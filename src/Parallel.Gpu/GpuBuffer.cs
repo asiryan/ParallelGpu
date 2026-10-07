@@ -3,14 +3,23 @@ using ILGPU.Runtime;
 
 namespace ParallelGpu;
 
-/// <summary>A disposable, device-resident buffer. Dispose it before its owner,
-/// or let the owner release it. Stored views must not outlive the buffer.</summary>
+/// <summary>Owns a device-resident buffer allocated by a <see cref="GpuParallel"/> instance.</summary>
+/// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
+/// <remarks>Dispose the buffer when it is no longer needed. Its owner also releases outstanding buffers.
+/// Stored views must not be used after the buffer or its owner has been disposed.</remarks>
 public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
 {
+    /// <summary>The executor that owns this allocation and serializes access to it.</summary>
     private readonly GpuParallel owner;
+    /// <summary>The underlying ILGPU allocation released by this buffer.</summary>
     private readonly MemoryBuffer1D<T, Stride1D.Dense> memory;
+    /// <summary>Whether the device allocation has been released.</summary>
     private bool disposed;
 
+    /// <summary>Wraps an allocated device buffer and associates it with its owner.</summary>
+    /// <param name="owner">The executor that owns the allocation.</param>
+    /// <param name="memory">The device memory allocation.</param>
+    /// <param name="length">The number of elements in the allocation.</param>
     internal GpuBuffer(GpuParallel owner, MemoryBuffer1D<T, Stride1D.Dense> memory, int length)
     {
         this.owner = owner;
@@ -18,9 +27,12 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         Length = length;
     }
 
+    /// <summary>Gets the number of elements in the buffer.</summary>
     public int Length { get; }
 
-    /// <summary>Use this view only in kernels executed by this buffer's owner.</summary>
+    /// <summary>Gets the device view used by kernels executed by this buffer's owner.</summary>
+    /// <remarks>The view does not own memory and must not outlive the buffer.</remarks>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public ArrayView<T> View
     {
         get
@@ -33,6 +45,9 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Copies the entire buffer into a newly allocated host array.</summary>
+    /// <returns>An array containing the current buffer contents.</returns>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public T[] ToArray()
     {
         var result = new T[Length];
@@ -40,6 +55,11 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         return result;
     }
 
+    /// <summary>Replaces the buffer contents with data from a host array.</summary>
+    /// <param name="source">An array whose length equals <see cref="Length"/>.</param>
+    /// <exception cref="ArgumentNullException">The source array is null.</exception>
+    /// <exception cref="ArgumentException">The source length differs from the buffer length.</exception>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public void CopyFrom(T[] source)
     {
         if (source is null)
@@ -54,6 +74,11 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Copies the entire buffer into an existing host array.</summary>
+    /// <param name="destination">An array whose length equals <see cref="Length"/>.</param>
+    /// <exception cref="ArgumentNullException">The destination array is null.</exception>
+    /// <exception cref="ArgumentException">The destination length differs from the buffer length.</exception>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public void CopyTo(T[] destination)
     {
         if (destination is null)
@@ -68,6 +93,11 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Copies a contiguous buffer range into a host array.</summary>
+    /// <param name="sourceOffset">The zero-based offset of the first source element.</param>
+    /// <param name="destination">The array that determines the number of elements to copy.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The requested range lies outside the buffer.</exception>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     internal void CopyTo(int sourceOffset, T[] destination)
     {
         lock (owner.SyncRoot)
@@ -80,6 +110,8 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Releases the device allocation and unregisters the buffer from its owner.</summary>
+    /// <remarks>Repeated calls have no effect.</remarks>
     public void Dispose()
     {
         lock (owner.SyncRoot)
@@ -92,6 +124,10 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Checks that the buffer is alive and belongs to the requested executor.</summary>
+    /// <param name="expectedOwner">The executor that will use the buffer.</param>
+    /// <exception cref="ArgumentException">The buffer belongs to another executor.</exception>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     internal void ValidateOwner(GpuParallel expectedOwner)
     {
         if (!ReferenceEquals(owner, expectedOwner))
@@ -99,6 +135,7 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         ThrowIfDisposed();
     }
 
+    /// <summary>Rejects access after the buffer or its owner has been disposed.</summary>
     private void ThrowIfDisposed()
     {
         if (disposed)

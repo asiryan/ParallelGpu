@@ -5,32 +5,32 @@ using ILGPU.Runtime;
 
 namespace ParallelGpu;
 
+/// <summary>Compiles an ordinary loop delegate into a cached ILGPU kernel with translated captures.</summary>
+/// <remarks>Compiled instructions are reused, while closure values and collection transfers are
+/// rebuilt for every invocation.</remarks>
 internal sealed class LambdaKernel
 {
-    private sealed record Capture(FieldInfo[] Path, FieldInfo Destination, Type? Element)
-    {
-        internal object Read(object? target)
-        {
-            object? value = target;
-            foreach (var field in Path)
-                value = field.GetValue(field.IsStatic ? null : value ??
-                    throw new ArgumentException("A captured object is null.", "body"));
-            return value ?? throw new ArgumentException(
-                $"Captured collection '{Path[^1].Name}' is null.", "body");
-        }
-    }
-
+    /// <summary>The generated value type containing device views and captured scalar values.</summary>
     private readonly Type stateType;
-    private readonly Capture[] captures;
+    /// <summary>The field mappings used to read current closure values on every invocation.</summary>
+    private readonly LoopCapture[] captures;
+    /// <summary>The accelerator-bound launcher accepting an iteration count, lower bound, and boxed state.</summary>
     private readonly Action<int, int, object> launch;
 
-    private LambdaKernel(Type stateType, Capture[] captures, Action<int, int, object> launch)
+    /// <summary>Stores the generated state type, capture mappings, and bound kernel launcher.</summary>
+    /// <param name="stateType">The generated value type used for kernel arguments.</param>
+    /// <param name="captures">Mappings from host fields to state fields.</param>
+    /// <param name="launch">The bound device launcher.</param>
+    private LambdaKernel(Type stateType, LoopCapture[] captures, Action<int, int, object> launch)
     {
         this.stateType = stateType;
         this.captures = captures;
         this.launch = launch;
     }
 
+    /// <summary>Rejects collection element types outside the supported numeric set.</summary>
+    /// <param name="type">The requested collection element type.</param>
+    /// <exception cref="NotSupportedException">The element type is unsupported.</exception>
     internal static void ValidateElementType(Type type)
     {
         if (!CapturedCollection.IsNumeric(type))
@@ -39,6 +39,14 @@ internal sealed class LambdaKernel
                 "Use float, int, uint, long, ulong, double, short, ushort, byte or sbyte.");
     }
 
+    /// <summary>Uploads current captures, executes the cached kernel, and copies written collections back.</summary>
+    /// <param name="gpu">The executor that owns this kernel's accelerator.</param>
+    /// <param name="body">The current delegate instance supplying closure values.</param>
+    /// <param name="start">The inclusive lower bound of the loop range.</param>
+    /// <param name="count">The positive number of iterations to launch.</param>
+    /// <param name="expectedElement">The required collection element type, or null for mixed types.</param>
+    /// <exception cref="ArgumentException">A capture is null or has an unexpected collection element type.</exception>
+    /// <exception cref="NotSupportedException">A captured runtime collection is unsupported.</exception>
     internal void Execute(GpuParallel gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
         var state = Activator.CreateInstance(stateType)!;
@@ -74,6 +82,11 @@ internal sealed class LambdaKernel
         transfers.CopyBack();
     }
 
+    /// <summary>Rewrites a managed loop body and loads its generated entry point on an accelerator.</summary>
+    /// <param name="accelerator">The accelerator used to compile and launch the kernel.</param>
+    /// <param name="source">The original delegate method to translate.</param>
+    /// <returns>A compiled kernel with capture metadata and a bound launcher.</returns>
+    /// <exception cref="NotSupportedException">The body cannot be translated or compiled for the device.</exception>
     internal static LambdaKernel Compile(Accelerator accelerator, MethodInfo source)
     {
         var instructions = LoopIL.Read(source);
@@ -83,6 +96,7 @@ internal sealed class LambdaKernel
             AssemblyBuilderAccess.RunAndCollect);
         var accessAttribute = typeof(System.Runtime.CompilerServices.IgnoresAccessChecksToAttribute)
             .GetConstructor([typeof(string)])!;
+        // Generated code must call internal collection helpers and private scalar helpers from the original body.
         var referencedAssemblies = instructions.Select(instruction => instruction.Operand)
             .OfType<MemberInfo>().Select(member => member.Module.Assembly)
             .Append(source.Module.Assembly).Append(typeof(DeviceCollection).Assembly).Distinct();
@@ -101,6 +115,7 @@ internal sealed class LambdaKernel
                 throw Unsupported("Pinned variables");
             il.DeclareLocal(MapType(local.LocalType));
         }
+        // Keep labels keyed by original offsets because rewritten instructions can have different sizes.
         var labels = instructions.ToDictionary(instruction => instruction.Offset, _ => il.DefineLabel());
         var branches = instructions.Where(instruction =>
                 instruction.Code.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget)
@@ -119,6 +134,7 @@ internal sealed class LambdaKernel
                 var fields = new List<FieldInfo>();
                 if (instruction.Code == OpCodes.Ldsfld)
                     fields.Add((FieldInfo)instruction.Operand!);
+                // Collapse a closure field chain only when no branch can enter it partway through.
                 while (fields.Count == 0 || !IsCaptureType(fields[^1].FieldType))
                 {
                     if (++i >= instructions.Count || instructions[i].Code != OpCodes.Ldfld ||
@@ -127,6 +143,7 @@ internal sealed class LambdaKernel
                     il.MarkLabel(labels[instructions[i].Offset]);
                     fields.Add((FieldInfo)instructions[i].Operand!);
                 }
+                // Metadata identity distinguishes same-named fields and reuses repeated capture paths.
                 string key = string.Join("/", fields.Select(field =>
                     field.Module.ModuleVersionId + ":" + field.MetadataToken));
                 if (!paths.TryGetValue(key, out var capture))
@@ -180,6 +197,7 @@ internal sealed class LambdaKernel
             LoopIL.Emit(il, instruction, labels);
         }
 
+        // The ILGPU entry point converts a zero-based device index into the original loop index.
         var entry = state.DefineMethod("Execute", MethodAttributes.Public | MethodAttributes.Static,
             typeof(void), [typeof(Index1D), typeof(int), state]);
         var entryIL = entry.GetILGenerator();
@@ -191,7 +209,7 @@ internal sealed class LambdaKernel
         entryIL.Emit(OpCodes.Call, body);
         entryIL.Emit(OpCodes.Ret);
         var stateType = state.CreateType()!;
-        var captures = paths.Values.Select(capture => new Capture(capture.Path,
+        var captures = paths.Values.Select(capture => new LoopCapture(capture.Path,
             stateType.GetField(capture.Field.Name)!, capture.Element)).ToArray();
         try
         {
@@ -209,6 +227,11 @@ internal sealed class LambdaKernel
         }
     }
 
+    /// <summary>Binds the generated entry point to a strongly typed ILGPU launcher.</summary>
+    /// <typeparam name="TState">The generated kernel state value type.</typeparam>
+    /// <param name="accelerator">The accelerator that loads the kernel.</param>
+    /// <param name="entry">The generated static kernel entry method.</param>
+    /// <returns>A launcher accepting the loop count, lower bound, and boxed state.</returns>
     private static Action<int, int, object> Load<TState>(Accelerator accelerator, MethodInfo entry)
         where TState : struct
     {
@@ -217,12 +240,21 @@ internal sealed class LambdaKernel
         return (count, start, state) => kernel(count, start, (TState)state);
     }
 
+    /// <summary>Checks whether a captured field can be translated as a scalar or collection.</summary>
+    /// <param name="type">The captured field type.</param>
+    /// <returns>True when the field is a supported capture.</returns>
     private static bool IsCaptureType(Type type) => IsScalar(type) ||
         CapturedCollection.ElementType(type) is not null;
 
+    /// <summary>Checks whether a type can be used as a numeric or simple scalar value.</summary>
+    /// <param name="type">The candidate scalar type.</param>
+    /// <returns>True for supported numeric types, Boolean, character, and enum values.</returns>
     private static bool IsScalar(Type type) => CapturedCollection.IsNumeric(type) ||
         type == typeof(bool) || type == typeof(char) || type.IsEnum;
 
+    /// <summary>Maps a supported managed collection to its device view and preserves scalar types.</summary>
+    /// <param name="type">The captured field or local variable type.</param>
+    /// <returns>The corresponding generated kernel type.</returns>
     private static Type MapType(Type type)
     {
         if (CapturedCollection.ElementType(type) is not null)
@@ -232,6 +264,10 @@ internal sealed class LambdaKernel
         throw Unsupported($"Type '{type}'");
     }
 
+    /// <summary>Rewrites supported array instructions as device collection operations.</summary>
+    /// <param name="il">The destination IL generator.</param>
+    /// <param name="instruction">The decoded array instruction to inspect.</param>
+    /// <returns>True if the instruction was recognized and emitted; otherwise, false.</returns>
     private static bool TryArrayOperation(ILGenerator il, LoopInstruction instruction)
     {
         var code = instruction.Code;
@@ -279,6 +315,9 @@ internal sealed class LambdaKernel
         return true;
     }
 
+    /// <summary>Rewrites collection calls and preserves supported device-compatible scalar calls.</summary>
+    /// <param name="il">The destination IL generator.</param>
+    /// <param name="method">The source method referenced by the call instruction.</param>
     private static void EmitCall(ILGenerator il, MethodInfo method)
     {
         var declaringType = method.DeclaringType!;
@@ -331,6 +370,7 @@ internal sealed class LambdaKernel
                 return;
             }
         }
+        // Collection instance calls were replaced above; remaining helpers must use scalar-only signatures.
         if ((!method.IsStatic && !IsScalar(declaringType)) ||
             method.GetParameters().Any(parameter => !IsScalar(
                 parameter.ParameterType.IsByRef ? parameter.ParameterType.GetElementType()! : parameter.ParameterType)) ||
@@ -339,11 +379,10 @@ internal sealed class LambdaKernel
         il.Emit(OpCodes.Call, method);
     }
 
+    /// <summary>Creates an exception identifying a feature unavailable inside GPU loop bodies.</summary>
+    /// <param name="feature">The unsupported feature or operation.</param>
+    /// <returns>An exception describing the unsupported feature and loop restrictions.</returns>
     private static NotSupportedException Unsupported(string feature) => new(
         feature + " is not supported inside GPU loops. Use numeric locals and captured arrays or List<T>; " +
         "write results by index. No CPU fallback is performed.");
 }
-
-
-
-

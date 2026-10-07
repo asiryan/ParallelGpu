@@ -4,6 +4,8 @@
     <LangVersion>12.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <WarningsAsErrors>$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <RootNamespace>ParallelGpu</RootNamespace>
     <Description>Typed GPU parallel loops with automatic lambda compilation and collection transfers, powered by ILGPU.</Description>
     <Version>0.1.0</Version>
@@ -12,5 +14,3 @@
     <PackageReference Include="ILGPU" Version="1.5.3" />
   </ItemGroup>
 </Project>
-
-

@@ -1,11 +1,15 @@
 namespace ParallelGpu;
 
+/// <summary>Specifies the accelerator backend used to execute parallel loops.</summary>
 public enum GpuBackend
 {
-    /// <summary>Try CUDA, then OpenCL. CPU fallback requires explicit permission.</summary>
+    /// <summary>Selects CUDA first, then OpenCL, with optional CPU fallback.</summary>
+    /// <remarks>CPU fallback requires <see cref="GpuParallelOptions.AllowCpuFallback"/>.</remarks>
     Auto,
+    /// <summary>Uses an NVIDIA CUDA accelerator.</summary>
     Cuda,
+    /// <summary>Uses a GPU accelerator provided by an OpenCL runtime.</summary>
     OpenCL,
-    /// <summary>ILGPU's CPU accelerator, useful for correctness tests and debugging.</summary>
+    /// <summary>Uses the ILGPU CPU accelerator for debugging and correctness checks.</summary>
     Cpu
 }

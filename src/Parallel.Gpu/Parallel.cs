@@ -1,10 +1,15 @@
 namespace ParallelGpu;
 
-/// <summary>GPU loops with ordinary C# bodies and automatic collection transfers.</summary>
+/// <summary>Provides GPU parallel loops with ordinary C# bodies and automatic collection transfers.</summary>
+/// <remarks>Overloads without options reuse a lazily created default executor.
+/// Overloads with options create an executor for each call; use <see cref="GpuParallel"/> to reuse
+/// a configured device and its compiled kernels.</remarks>
 public static class Parallel
 {
+    /// <summary>The process-wide executor, initialized only when a non-empty default loop runs.</summary>
     private static readonly Lazy<GpuParallel> Default = new(() => new GpuParallel());
 
+    /// <summary>Registers process-exit cleanup for the shared default executor.</summary>
     static Parallel()
     {
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
@@ -14,7 +19,16 @@ public static class Parallel
         };
     }
 
-    /// <summary>Executes a loop using the default GPU, compiling and caching its body.</summary>
+    /// <summary>Executes an ordinary loop body using the shared default GPU executor.</summary>
+    /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
+    /// <param name="toExclusive">The exclusive upper bound of the range.</param>
+    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <remarks>Captured collections are transferred automatically. Results are available on return.
+    /// Empty and reversed ranges do not initialize the default executor.</remarks>
+    /// <exception cref="ArgumentNullException">The body is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
+    /// <exception cref="NotSupportedException">The body or a captured collection is unsupported.</exception>
+    /// <exception cref="InvalidOperationException">No default GPU accelerator can be initialized.</exception>
     public static void For(int fromInclusive, int toExclusive, Action<int> body)
     {
         if (body is null)
@@ -24,7 +38,17 @@ public static class Parallel
         Default.Value.For(fromInclusive, toExclusive, body);
     }
 
-    /// <summary>Executes a loop whose captured collections contain elements of T.</summary>
+    /// <summary>Executes a typed loop using the shared default GPU executor.</summary>
+    /// <typeparam name="T">The supported numeric element type of every captured collection.</typeparam>
+    /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
+    /// <param name="toExclusive">The exclusive upper bound of the range.</param>
+    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <remarks>Use the non-generic overload for mixed collection types. Results are available on return.</remarks>
+    /// <exception cref="ArgumentNullException">The body is null.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
+    /// <exception cref="NotSupportedException">The element type, body, or a collection is unsupported.</exception>
+    /// <exception cref="InvalidOperationException">No default GPU accelerator can be initialized.</exception>
     public static void For<T>(int fromInclusive, int toExclusive, Action<int> body) where T : unmanaged
     {
         if (body is null)
@@ -35,7 +59,16 @@ public static class Parallel
         Default.Value.For<T>(fromInclusive, toExclusive, body);
     }
 
-    /// <summary>Executes a loop on the selected backend. Use GpuParallel to reuse a device.</summary>
+    /// <summary>Executes a loop using an executor created from the supplied device options.</summary>
+    /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
+    /// <param name="toExclusive">The exclusive upper bound of the range.</param>
+    /// <param name="options">Backend, device index, and fallback settings.</param>
+    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <remarks>The executor is disposed after execution. Empty and reversed ranges create no executor.</remarks>
+    /// <exception cref="ArgumentNullException">The options or body is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>
+    /// <exception cref="NotSupportedException">The body or a captured collection is unsupported.</exception>
+    /// <exception cref="InvalidOperationException">No eligible accelerator can be initialized.</exception>
     public static void For(int fromInclusive, int toExclusive, GpuParallelOptions options, Action<int> body)
     {
         if (options is null)
@@ -48,7 +81,18 @@ public static class Parallel
         gpu.For(fromInclusive, toExclusive, body);
     }
 
-    /// <summary>Executes a typed loop on the selected backend.</summary>
+    /// <summary>Executes a typed loop using an executor created from the supplied device options.</summary>
+    /// <typeparam name="T">The supported numeric element type of every captured collection.</typeparam>
+    /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
+    /// <param name="toExclusive">The exclusive upper bound of the range.</param>
+    /// <param name="options">Backend, device index, and fallback settings.</param>
+    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <remarks>The executor is disposed after execution. Use <see cref="GpuParallel"/> for repeated configured calls.</remarks>
+    /// <exception cref="ArgumentNullException">The options or body is null.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>
+    /// <exception cref="NotSupportedException">The element type, body, or a collection is unsupported.</exception>
+    /// <exception cref="InvalidOperationException">No eligible accelerator can be initialized.</exception>
     public static void For<T>(int fromInclusive, int toExclusive, GpuParallelOptions options, Action<int> body)
         where T : unmanaged
     {

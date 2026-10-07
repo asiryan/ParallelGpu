@@ -1,9 +1,11 @@
 namespace ParallelGpu;
 
-/// <summary>A value-type operation executed once for every index in a range.</summary>
-/// <remarks>Fields may contain GPU buffer views and ILGPU-supported value types.
-/// Managed objects, captured delegates and host API calls are not supported.</remarks>
+/// <summary>Defines a device-compatible operation executed once for each loop index.</summary>
+/// <remarks>Implement this interface in a public value type containing GPU views and supported values.
+/// Managed objects and host API calls cannot be used inside the operation.</remarks>
 public interface IGpuForKernel
 {
+    /// <summary>Executes the operation for one index in the requested range.</summary>
+    /// <param name="index">The original loop index, including the range's lower bound.</param>
     void Execute(int index);
 }

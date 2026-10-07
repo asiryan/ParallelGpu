@@ -3,16 +3,20 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-internal readonly record struct LoopInstruction(int Offset, OpCode Code, object? Operand);
-
+/// <summary>Decodes and re-emits the managed IL used by supported ordinary loop bodies.</summary>
 internal static class LoopIL
 {
+    /// <summary>Maps encoded instruction values to their reflection operation codes.</summary>
     internal static readonly Dictionary<short, OpCode> Codes = typeof(OpCodes)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Where(field => field.FieldType == typeof(OpCode))
         .Select(field => (OpCode)field.GetValue(null)!)
         .ToDictionary(code => code.Value);
 
+    /// <summary>Decodes a method body and resolves its metadata operands and branch targets.</summary>
+    /// <param name="method">The ordinary managed method containing the loop body.</param>
+    /// <returns>The decoded instructions in their original order.</returns>
+    /// <exception cref="NotSupportedException">The body is unavailable, contains exception handlers, or uses an unsupported operand format.</exception>
     internal static List<LoopInstruction> Read(MethodInfo method)
     {
         var body = method.GetMethodBody() ??
@@ -58,6 +62,7 @@ internal static class LoopIL
                     operand = BitConverter.ToDouble(bytes, position);
                     position += 8;
                     break;
+                // Branch displacements are relative to the end of their encoded instruction.
                 case OperandType.ShortInlineBrTarget:
                     operand = position + 1 + (sbyte)bytes[position];
                     position++;
@@ -91,6 +96,9 @@ internal static class LoopIL
         return instructions;
     }
 
+    /// <summary>Recognizes an argument-load instruction and extracts its argument index.</summary>
+    /// <param name="instruction">The decoded instruction to inspect.</param>
+    /// <returns>The loaded argument index, or null for a different instruction.</returns>
     internal static int? Argument(LoopInstruction instruction)
     {
         var code = instruction.Code;
@@ -103,9 +111,14 @@ internal static class LoopIL
         return null;
     }
 
+    /// <summary>Re-emits a decoded instruction using translated labels and resolved operands.</summary>
+    /// <param name="il">The destination IL generator.</param>
+    /// <param name="instruction">The decoded source instruction.</param>
+    /// <param name="labels">Destination labels indexed by original instruction offsets.</param>
     internal static void Emit(ILGenerator il, LoopInstruction instruction, Dictionary<int, Label> labels)
     {
         var code = instruction.Code;
+        // Replacements may exceed a short branch's range, so emit its long form and let labels resolve it.
         if (code.OperandType == OperandType.ShortInlineBrTarget)
             code = Codes.Values.Single(candidate => candidate.Name == code.Name![..^2]);
         switch (instruction.Code.OperandType)
