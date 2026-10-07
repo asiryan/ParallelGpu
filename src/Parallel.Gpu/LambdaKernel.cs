@@ -143,9 +143,10 @@ internal sealed class LambdaKernel
                     il.MarkLabel(labels[instructions[i].Offset]);
                     fields.Add((FieldInfo)instructions[i].Operand!);
                 }
-                // Metadata identity distinguishes same-named fields and reuses repeated capture paths.
+                // Closed declaring types distinguish fields sharing a metadata token across generic instantiations.
                 string key = string.Join("/", fields.Select(field =>
-                    field.Module.ModuleVersionId + ":" + field.MetadataToken));
+                    field.Module.ModuleVersionId + ":" + field.MetadataToken + ":" +
+                    field.DeclaringType?.AssemblyQualifiedName));
                 if (!paths.TryGetValue(key, out var capture))
                 {
                     var type = fields[^1].FieldType;

@@ -62,6 +62,42 @@ public sealed class LambdaLoopTests(GpuFixture fixture)
     }
 
     [Fact]
+    public void ClosedGenericStaticFieldsKeepSeparateCapturesAndReadFreshValues()
+    {
+        GenericCaptureState<int>.Scalar = 2;
+        GenericCaptureState<float>.Scalar = 7;
+        GenericCaptureState<int>.Values = [3, 4];
+        GenericCaptureState<float>.Values = [10, 20];
+        int[] scalarResult = new int[2];
+        int[] arrayResult = new int[2];
+
+        Action<int> body = i =>
+        {
+            scalarResult[i] = GenericCaptureState<int>.Scalar + GenericCaptureState<float>.Scalar + i;
+            arrayResult[i] = GenericCaptureState<int>.Values[i] + GenericCaptureState<float>.Values[i];
+            GenericCaptureState<int>.Values[i] += GenericCaptureState<int>.Scalar;
+            GenericCaptureState<float>.Values[i] += GenericCaptureState<float>.Scalar;
+        };
+
+        Gpu.For<int>(0, scalarResult.Length, body);
+        Assert.Equal(new[] { 9, 10 }, scalarResult);
+        Assert.Equal(new[] { 13, 24 }, arrayResult);
+        Assert.Equal(new[] { 5, 6 }, GenericCaptureState<int>.Values);
+        Assert.Equal(new[] { 17, 27 }, GenericCaptureState<float>.Values);
+
+        GenericCaptureState<int>.Scalar = 3;
+        GenericCaptureState<float>.Scalar = 11;
+        GenericCaptureState<int>.Values = [1, 2];
+        GenericCaptureState<float>.Values = [20, 30];
+
+        Gpu.For<int>(0, scalarResult.Length, body);
+        Assert.Equal(new[] { 14, 15 }, scalarResult);
+        Assert.Equal(new[] { 21, 32 }, arrayResult);
+        Assert.Equal(new[] { 4, 5 }, GenericCaptureState<int>.Values);
+        Assert.Equal(new[] { 31, 41 }, GenericCaptureState<float>.Values);
+    }
+
+    [Fact]
     public void CachedBodyUsesTheCurrentClosureInstance()
     {
         int[] first = new int[3];
