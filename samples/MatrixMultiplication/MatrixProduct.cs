@@ -29,7 +29,7 @@ public static class MatrixProduct
         var (rows, inner, columns) = Matrices.ProductShape(a, b);
         float[][] result = Matrices.Create(rows, columns);
 
-        System.Threading.Tasks.Parallel.For(0, rows, row =>
+        Parallel.For(0, rows, row =>
         {
             for (int column = 0; column < columns; column++)
             {

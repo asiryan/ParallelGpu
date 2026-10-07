@@ -226,7 +226,7 @@ public sealed class LambdaLoopTests(GpuFixture fixture)
     {
         float[] output = new float[3];
 
-        ParallelGpu.Parallel.For<float>(0, output.Length, new() { Backend = Gpu.Backend },
+        ParallelGpu.GpuParallel.For<float>(0, output.Length, new() { Backend = Gpu.Backend },
             i => output[i] = i * 0.5f);
 
         Assert.Equal(new float[] { 0, 0.5f, 1 }, output);

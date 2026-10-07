@@ -4,13 +4,13 @@ namespace ParallelGpu;
 /// <remarks>Overloads without options reuse a lazily created default executor.
 /// Overloads with options create an executor for each call; use <see cref="Gpu"/> to reuse
 /// a configured device and its compiled kernels.</remarks>
-public static class Parallel
+public static class GpuParallel
 {
     /// <summary>The process-wide executor, initialized only when a non-empty default loop runs.</summary>
     private static readonly Lazy<Gpu> Default = new(() => new Gpu());
 
     /// <summary>Registers process-exit cleanup for the shared default executor.</summary>
-    static Parallel()
+    static GpuParallel()
     {
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
