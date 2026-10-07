@@ -9,7 +9,7 @@ namespace ParallelGpu;
 /// <summary>Owns an ILGPU accelerator and executes synchronous parallel loops.</summary>
 /// <remarks>Calls on one instance are serialized. Loop methods wait for device execution and required
 /// host copies to complete. Reuse one instance to retain compiled kernels between calls.</remarks>
-public sealed partial class GpuParallel : IDisposable
+public sealed partial class Gpu : IDisposable
 {
     /// <summary>The ILGPU context owning device discovery and compilation services.</summary>
     private readonly Context context;
@@ -31,7 +31,7 @@ public sealed partial class GpuParallel : IDisposable
     /// <param name="options">Device selection options, or null to use the defaults.</param>
     /// <exception cref="ArgumentOutOfRangeException">The backend is invalid or the device index is unavailable.</exception>
     /// <exception cref="InvalidOperationException">No accelerator can be initialized under the requested options.</exception>
-    public GpuParallel(GpuParallelOptions? options = null)
+    public Gpu(GpuOptions? options = null)
     {
         options ??= new();
         if (!Enum.IsDefined(typeof(GpuBackend), options.Backend))
@@ -281,7 +281,7 @@ public sealed partial class GpuParallel : IDisposable
     /// <param name="context">The ILGPU context containing the discovered devices.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
     /// <returns>The first successfully initialized eligible accelerator.</returns>
-    private static Accelerator CreateAccelerator(Context context, GpuParallelOptions options)
+    private static Accelerator CreateAccelerator(Context context, GpuOptions options)
     {
         var devices = context.Devices.Where(device => options.Backend switch
         {

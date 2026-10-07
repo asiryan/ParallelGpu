@@ -5,7 +5,7 @@ namespace ParallelGpu.Tests;
 [Collection("GPU")]
 public sealed class LambdaLoopTests(GpuFixture fixture)
 {
-    private GpuParallel Gpu => fixture.Gpu;
+    private Gpu Gpu => fixture.Gpu;
 
     [Fact]
     public void FloatArraysSupportLocalsBranchesAndInnerLoops()

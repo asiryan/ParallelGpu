@@ -2,7 +2,7 @@ using System.Reflection;
 
 namespace ParallelGpu;
 
-public sealed partial class GpuParallel
+public sealed partial class Gpu
 {
     /// <summary>Compiled lambda kernels cached by body method; closure values are read separately on each call.</summary>
     private readonly Dictionary<MethodInfo, LambdaKernel> lambdaKernels = new();

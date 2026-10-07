@@ -8,7 +8,7 @@ namespace ParallelGpu;
 /// <param name="gpu">The executor that owns all device allocations.</param>
 /// <remarks>Reference identity preserves aliases. Collections share one data buffer per numeric type
 /// and common buffers for row metadata and write flags.</remarks>
-internal sealed class CollectionTransfers(GpuParallel gpu) : IDisposable
+internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
 {
     /// <summary>Typed registration delegates shared across invocations to avoid repeated generic reflection.</summary>
     private static readonly ConcurrentDictionary<Type, Func<CollectionTransfers, object, CapturedCollection>>

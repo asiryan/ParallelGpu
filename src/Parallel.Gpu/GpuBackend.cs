@@ -4,7 +4,7 @@ namespace ParallelGpu;
 public enum GpuBackend
 {
     /// <summary>Selects CUDA first, then OpenCL, with optional CPU fallback.</summary>
-    /// <remarks>CPU fallback requires <see cref="GpuParallelOptions.AllowCpuFallback"/>.</remarks>
+    /// <remarks>CPU fallback requires <see cref="GpuOptions.AllowCpuFallback"/>.</remarks>
     Auto,
     /// <summary>Uses an NVIDIA CUDA accelerator.</summary>
     Cuda,

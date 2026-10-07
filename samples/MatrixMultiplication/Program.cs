@@ -11,7 +11,7 @@ const GpuBackend Backend = GpuBackend.Auto;
 float[][] a = Matrices.Random(Rows, Inner, seed: 12345);
 float[][] b = Matrices.Random(Inner, Columns, seed: 67890);
 
-using var gpu = new GpuParallel(new GpuParallelOptions
+using var gpu = new Gpu(new GpuOptions
 {
     Backend = Backend,
     AllowCpuFallback = true

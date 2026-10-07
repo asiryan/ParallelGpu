@@ -4,7 +4,7 @@ namespace MatrixMultiplication;
 
 public static class MatrixProduct
 {
-    public static float[][] MultiplyOnGpu(GpuParallel gpu, float[][] a, float[][] b)
+    public static float[][] MultiplyOnGpu(Gpu gpu, float[][] a, float[][] b)
     {
         ArgumentNullException.ThrowIfNull(gpu);
         var (rows, inner, columns) = Matrices.ProductShape(a, b);

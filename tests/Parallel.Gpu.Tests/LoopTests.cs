@@ -6,7 +6,7 @@ namespace ParallelGpu.Tests;
 [Collection("GPU")]
 public sealed class LoopTests(GpuFixture fixture)
 {
-    private GpuParallel Gpu => fixture.Gpu;
+    private Gpu Gpu => fixture.Gpu;
 
     [Fact]
     public void ForPreservesNeighborsAndUsesCurrentKernelArguments()
@@ -46,7 +46,7 @@ public sealed class LoopTests(GpuFixture fixture)
         Assert.Throws<ArgumentException>(() => buffer.CopyFrom(new float[2]));
         Assert.Throws<ArgumentException>(() => buffer.CopyTo(new float[4]));
 
-        using var other = new GpuParallel(new() { Backend = GpuBackend.Cpu });
+        using var other = new Gpu(new() { Backend = GpuBackend.Cpu });
         Assert.Throws<ArgumentException>(() => other.ForEach(buffer, new ScaleKernel(2)));
 
         buffer.Dispose();
@@ -56,7 +56,7 @@ public sealed class LoopTests(GpuFixture fixture)
     [Fact]
     public void DisposingOwnerReleasesItsBuffers()
     {
-        using var owner = new GpuParallel(new() { Backend = GpuBackend.Cpu });
+        using var owner = new Gpu(new() { Backend = GpuBackend.Cpu });
         var buffer = owner.Allocate<int>(3);
         owner.Dispose();
 

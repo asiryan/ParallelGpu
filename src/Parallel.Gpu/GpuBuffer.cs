@@ -3,14 +3,14 @@ using ILGPU.Runtime;
 
 namespace ParallelGpu;
 
-/// <summary>Owns a device-resident buffer allocated by a <see cref="GpuParallel"/> instance.</summary>
+/// <summary>Owns a device-resident buffer allocated by a <see cref="Gpu"/> instance.</summary>
 /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
 /// <remarks>Dispose the buffer when it is no longer needed. Its owner also releases outstanding buffers.
 /// Stored views must not be used after the buffer or its owner has been disposed.</remarks>
 public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
 {
     /// <summary>The executor that owns this allocation and serializes access to it.</summary>
-    private readonly GpuParallel owner;
+    private readonly Gpu owner;
     /// <summary>The underlying ILGPU allocation released by this buffer.</summary>
     private readonly MemoryBuffer1D<T, Stride1D.Dense> memory;
     /// <summary>Whether the device allocation has been released.</summary>
@@ -20,7 +20,7 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
     /// <param name="owner">The executor that owns the allocation.</param>
     /// <param name="memory">The device memory allocation.</param>
     /// <param name="length">The number of elements in the allocation.</param>
-    internal GpuBuffer(GpuParallel owner, MemoryBuffer1D<T, Stride1D.Dense> memory, int length)
+    internal GpuBuffer(Gpu owner, MemoryBuffer1D<T, Stride1D.Dense> memory, int length)
     {
         this.owner = owner;
         this.memory = memory;
@@ -128,10 +128,10 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
     /// <param name="expectedOwner">The executor that will use the buffer.</param>
     /// <exception cref="ArgumentException">The buffer belongs to another executor.</exception>
     /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
-    internal void ValidateOwner(GpuParallel expectedOwner)
+    internal void ValidateOwner(Gpu expectedOwner)
     {
         if (!ReferenceEquals(owner, expectedOwner))
-            throw new ArgumentException("The buffer belongs to another GpuParallel instance.");
+            throw new ArgumentException("The buffer belongs to another Gpu instance.");
         ThrowIfDisposed();
     }
 

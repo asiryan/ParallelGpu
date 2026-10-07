@@ -5,7 +5,7 @@ namespace ParallelGpu.Tests;
 
 public sealed class GpuFixture : IDisposable
 {
-    public GpuParallel Gpu { get; }
+    public Gpu Gpu { get; }
 
     public GpuFixture()
     {

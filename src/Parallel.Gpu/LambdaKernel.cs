@@ -47,7 +47,7 @@ internal sealed class LambdaKernel
     /// <param name="expectedElement">The required collection element type, or null for mixed types.</param>
     /// <exception cref="ArgumentException">A capture is null or has an unexpected collection element type.</exception>
     /// <exception cref="NotSupportedException">A captured runtime collection is unsupported.</exception>
-    internal void Execute(GpuParallel gpu, Action<int> body, int start, int count, Type? expectedElement)
+    internal void Execute(Gpu gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
         var state = Activator.CreateInstance(stateType)!;
         using var transfers = new CollectionTransfers(gpu);

@@ -2,12 +2,12 @@ namespace ParallelGpu;
 
 /// <summary>Provides GPU parallel loops with ordinary C# bodies and automatic collection transfers.</summary>
 /// <remarks>Overloads without options reuse a lazily created default executor.
-/// Overloads with options create an executor for each call; use <see cref="GpuParallel"/> to reuse
+/// Overloads with options create an executor for each call; use <see cref="Gpu"/> to reuse
 /// a configured device and its compiled kernels.</remarks>
 public static class Parallel
 {
     /// <summary>The process-wide executor, initialized only when a non-empty default loop runs.</summary>
-    private static readonly Lazy<GpuParallel> Default = new(() => new GpuParallel());
+    private static readonly Lazy<Gpu> Default = new(() => new Gpu());
 
     /// <summary>Registers process-exit cleanup for the shared default executor.</summary>
     static Parallel()
@@ -69,7 +69,7 @@ public static class Parallel
     /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>
     /// <exception cref="NotSupportedException">The body or a captured collection is unsupported.</exception>
     /// <exception cref="InvalidOperationException">No eligible accelerator can be initialized.</exception>
-    public static void For(int fromInclusive, int toExclusive, GpuParallelOptions options, Action<int> body)
+    public static void For(int fromInclusive, int toExclusive, GpuOptions options, Action<int> body)
     {
         if (options is null)
             throw new ArgumentNullException(nameof(options));
@@ -77,7 +77,7 @@ public static class Parallel
             throw new ArgumentNullException(nameof(body));
         if (toExclusive <= fromInclusive)
             return;
-        using var gpu = new GpuParallel(options);
+        using var gpu = new Gpu(options);
         gpu.For(fromInclusive, toExclusive, body);
     }
 
@@ -87,13 +87,13 @@ public static class Parallel
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
     /// <param name="body">The device-compatible numeric loop body.</param>
-    /// <remarks>The executor is disposed after execution. Use <see cref="GpuParallel"/> for repeated configured calls.</remarks>
+    /// <remarks>The executor is disposed after execution. Use <see cref="Gpu"/> for repeated configured calls.</remarks>
     /// <exception cref="ArgumentNullException">The options or body is null.</exception>
     /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>
     /// <exception cref="NotSupportedException">The element type, body, or a collection is unsupported.</exception>
     /// <exception cref="InvalidOperationException">No eligible accelerator can be initialized.</exception>
-    public static void For<T>(int fromInclusive, int toExclusive, GpuParallelOptions options, Action<int> body)
+    public static void For<T>(int fromInclusive, int toExclusive, GpuOptions options, Action<int> body)
         where T : unmanaged
     {
         if (options is null)
@@ -103,7 +103,7 @@ public static class Parallel
         LambdaKernel.ValidateElementType(typeof(T));
         if (toExclusive <= fromInclusive)
             return;
-        using var gpu = new GpuParallel(options);
+        using var gpu = new Gpu(options);
         gpu.For<T>(fromInclusive, toExclusive, body);
     }
 }

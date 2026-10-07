@@ -29,7 +29,7 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     }
 
     /// <inheritdoc/>
-    internal override void Upload(GpuParallel gpu)
+    internal override void Upload(Gpu gpu)
     {
         var packed = new T[length];
         foreach (var collection in collections)

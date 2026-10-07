@@ -1,7 +1,7 @@
 namespace ParallelGpu;
 
 /// <summary>Configures accelerator selection and optional CPU fallback.</summary>
-public sealed record GpuParallelOptions
+public sealed record GpuOptions
 {
     /// <summary>Gets or initializes the requested backend. The default is <see cref="GpuBackend.Auto"/>.</summary>
     public GpuBackend Backend { get; init; } = GpuBackend.Auto;
