@@ -17,17 +17,20 @@ using var gpu = new GpuParallel(new GpuParallelOptions
     AllowCpuFallback = true
 });
 
-Console.WriteLine($"Device: {gpu.DeviceName} ({gpu.Backend})");
 Console.WriteLine($"A: {Rows} x {Inner}, B: {Inner} x {Columns}");
 
 // Warm up both methods; exclude the initial GPU kernel compilation from timing.
 MatrixProduct.MultiplyOnCpu(a, b);
 MatrixProduct.MultiplyOnGpu(gpu, a, b);
 
+// CPU
 var timer = Stopwatch.StartNew();
 float[][] cpuResult = MatrixProduct.MultiplyOnCpu(a, b);
 timer.Stop();
 Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
+
+// GPU
+Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
 
 timer.Restart();
 float[][] gpuResult = MatrixProduct.MultiplyOnGpu(gpu, a, b);
