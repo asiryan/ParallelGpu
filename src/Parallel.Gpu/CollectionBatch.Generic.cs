@@ -1,20 +1,30 @@
+using System.Runtime.InteropServices;
 using ILGPU;
 
 namespace ParallelGpu;
 
-/// <summary>Packs leaf collections of one numeric type into a contiguous device buffer.</summary>
-/// <typeparam name="T">The numeric element type.</typeparam>
+/// <summary>Packs leaf collections of one supported type into a contiguous device buffer.</summary>
+/// <typeparam name="T">The host element type.</typeparam>
 internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
 {
     /// <summary>Leaf collections in packed-buffer order, allowing adjacent written slices to be downloaded together.</summary>
     private readonly List<CapturedCollection<T>> collections = new();
-    /// <summary>The shared numeric device buffer created after all leaf slices are registered.</summary>
+    /// <summary>The shared device buffer for elements with a native storage representation.</summary>
     private GpuBuffer<T>? buffer;
+    /// <summary>The shared 32-bit storage used for Boolean and character elements.</summary>
+    private GpuBuffer<int>? paddedBuffer;
     /// <summary>The total reserved element count for this batch.</summary>
     private int length;
 
-    /// <summary>Gets the shared device view after the batch has been uploaded.</summary>
-    internal ArrayView<T> View => buffer!.View;
+    /// <summary>Gets the shared byte view after the batch has been uploaded.</summary>
+    internal ArrayView<byte> View => UsesPaddedStorage
+        ? paddedBuffer!.View.Cast<byte>() : buffer!.View.Cast<byte>();
+
+    /// <summary>Gets the physical distance between elements in bytes, including Boolean and character padding.</summary>
+    internal int ElementSize => UsesPaddedStorage ? sizeof(int) : Interop.SizeOf<T>();
+
+    /// <summary>Gets whether the device requires aligned 32-bit slots for this host element type.</summary>
+    private static bool UsesPaddedStorage => typeof(T) == typeof(bool) || typeof(T) == typeof(char);
 
     /// <summary>Reserves a contiguous slice for a leaf collection.</summary>
     /// <param name="collection">The leaf collection to append.</param>
@@ -31,10 +41,64 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     /// <inheritdoc/>
     internal override void Upload(Gpu gpu)
     {
+        if (UsesPaddedStorage)
+        {
+            // Aligned slots avoid relying on ILGPU Boolean and character layouts matching their CLR layouts.
+            var padded = new int[length];
+            foreach (var collection in collections)
+                Pack(collection.Snapshot, padded.AsSpan(collection.Offset, collection.Snapshot.Length));
+            paddedBuffer = gpu.Upload(padded);
+            return;
+        }
         var packed = new T[length];
         foreach (var collection in collections)
             collection.Snapshot.CopyTo(packed, collection.Offset);
         buffer = gpu.Upload(packed);
+    }
+
+    /// <summary>Converts Boolean or UTF-16 character values into aligned device slots.</summary>
+    /// <param name="source">The host elements to convert.</param>
+    /// <param name="destination">The matching device slots.</param>
+    private static void Pack(ReadOnlySpan<T> source, Span<int> destination)
+    {
+        if (typeof(T) == typeof(bool))
+        {
+            var values = MemoryMarshal.Cast<T, bool>(source);
+            for (int i = 0; i < values.Length; i++)
+                destination[i] = values[i] ? 1 : 0;
+        }
+        else
+        {
+            var values = MemoryMarshal.Cast<T, char>(source);
+            for (int i = 0; i < values.Length; i++)
+                destination[i] = values[i];
+        }
+    }
+
+    /// <summary>Downloads a slice and converts padded slots back to their host element representation.</summary>
+    /// <param name="offset">The starting element offset in the packed buffer.</param>
+    /// <param name="destination">The host array to receive the slice.</param>
+    private void Download(int offset, T[] destination)
+    {
+        if (!UsesPaddedStorage)
+        {
+            buffer!.CopyTo(offset, destination);
+            return;
+        }
+        var padded = new int[destination.Length];
+        paddedBuffer!.CopyTo(offset, padded);
+        if (typeof(T) == typeof(bool))
+        {
+            var values = MemoryMarshal.Cast<T, bool>(destination.AsSpan());
+            for (int i = 0; i < values.Length; i++)
+                values[i] = padded[i] != 0;
+        }
+        else
+        {
+            var values = MemoryMarshal.Cast<T, char>(destination.AsSpan());
+            for (int i = 0; i < values.Length; i++)
+                values[i] = unchecked((char)padded[i]);
+        }
     }
 
     /// <inheritdoc/>
@@ -61,7 +125,7 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
                 end++;
             }
             var result = new T[limit - collection.Offset];
-            buffer!.CopyTo(collection.Offset, result);
+            Download(collection.Offset, result);
             for (int i = first; i < end; i++)
             {
                 var target = collections[i];
@@ -73,5 +137,9 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     }
 
     /// <inheritdoc/>
-    public override void Dispose() => buffer?.Dispose();
+    public override void Dispose()
+    {
+        buffer?.Dispose();
+        paddedBuffer?.Dispose();
+    }
 }

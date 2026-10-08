@@ -1,6 +1,6 @@
 namespace ParallelGpu;
 
-/// <summary>Defines allocation and copy-back operations for a batch of one numeric element type.</summary>
+/// <summary>Defines allocation and copy-back operations for a batch of one supported element type.</summary>
 internal abstract class CollectionBatch : IDisposable
 {
     /// <summary>Packs registered host collections and uploads their data into a shared device allocation.</summary>

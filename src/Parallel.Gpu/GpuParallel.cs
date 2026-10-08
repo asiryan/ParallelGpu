@@ -22,7 +22,7 @@ public static class GpuParallel
     /// <summary>Executes an ordinary loop body using the shared default GPU executor.</summary>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
-    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>Captured collections are transferred automatically. Results are available on return.
     /// Empty and reversed ranges do not initialize the default executor.</remarks>
     /// <exception cref="ArgumentNullException">The body is null.</exception>
@@ -39,10 +39,10 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using the shared default GPU executor.</summary>
-    /// <typeparam name="T">The supported numeric element type of every captured collection.</typeparam>
+    /// <typeparam name="T">The element type of every captured collection: float, int, uint, long, ulong, double, short, ushort, byte, sbyte, bool, char, or an enum.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
-    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>Use the non-generic overload for mixed collection types. Results are available on return.</remarks>
     /// <exception cref="ArgumentNullException">The body is null.</exception>
     /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
@@ -63,7 +63,7 @@ public static class GpuParallel
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
-    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>The executor is disposed after execution. Empty and reversed ranges create no executor.</remarks>
     /// <exception cref="ArgumentNullException">The options or body is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>
@@ -82,11 +82,11 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using an executor created from the supplied device options.</summary>
-    /// <typeparam name="T">The supported numeric element type of every captured collection.</typeparam>
+    /// <typeparam name="T">The element type of every captured collection: float, int, uint, long, ulong, double, short, ushort, byte, sbyte, bool, char, or an enum.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
-    /// <param name="body">The device-compatible numeric loop body.</param>
+    /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>The executor is disposed after execution. Use <see cref="Gpu"/> for repeated configured calls.</remarks>
     /// <exception cref="ArgumentNullException">The options or body is null.</exception>
     /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>

@@ -5,7 +5,7 @@ namespace ParallelGpu;
 /// <summary>Maps a captured host value to a field in the generated kernel state.</summary>
 /// <param name="Path">The field path from the current closure or a static root to the captured value.</param>
 /// <param name="Destination">The generated state field that receives the scalar or device view.</param>
-/// <param name="Element">The numeric collection element type, or null for a scalar.</param>
+/// <param name="Element">The supported collection element type, or null for a scalar.</param>
 internal sealed record LoopCapture(FieldInfo[] Path, FieldInfo Destination, Type? Element)
 {
     /// <summary>Reads the current captured value by following the original field path.</summary>

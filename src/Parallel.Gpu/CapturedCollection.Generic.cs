@@ -1,9 +1,7 @@
-using ILGPU;
-
 namespace ParallelGpu;
 
-/// <summary>Maps one flat array, list, or rectangular array to a slice of a packed numeric buffer.</summary>
-/// <typeparam name="T">The numeric element type.</typeparam>
+/// <summary>Maps one flat array, list, or rectangular array to a slice of a packed device buffer.</summary>
+/// <typeparam name="T">The supported host element type.</typeparam>
 internal sealed class CapturedCollection<T> : CapturedCollection where T : unmanaged
 {
     /// <summary>The original host collection updated when this slice is copied back.</summary>
@@ -20,7 +18,7 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
     /// <summary>Gets the flat host data used when packing the device buffer.</summary>
     /// <remarks>Flat arrays are used directly; lists and rectangular arrays are flattened into snapshots.</remarks>
     internal T[] Snapshot { get; }
-    /// <summary>Gets the element offset of this collection in its packed numeric buffer.</summary>
+    /// <summary>Gets the element offset of this collection in its packed device buffer.</summary>
     internal int Offset { get; }
     /// <summary>Gets the index of this collection's device write flag.</summary>
     internal int DirtyIndex { get; }
@@ -30,7 +28,7 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
 
     /// <summary>Snapshots a host collection and reserves its buffer slice and write flag.</summary>
     /// <param name="transfers">The transfer registry for the current invocation.</param>
-    /// <param name="source">A numeric array, list, or zero-based rectangular array.</param>
+    /// <param name="source">A supported array, list, or zero-based rectangular array.</param>
     /// <exception cref="NotSupportedException">The collection type or array lower bounds are unsupported.</exception>
     internal CapturedCollection(CollectionTransfers transfers, object source)
     {
@@ -65,8 +63,10 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
 
     /// <inheritdoc/>
     internal override DeviceCollection View => new(
-        batch.View.SubView(Snapshot.Length == 0 ? 0 : Offset, Snapshot.Length).Cast<byte>(),
-        Snapshot.Length, rows, columns, writes: transfers.Writes, dirtyIndex: DirtyIndex);
+        batch.View.SubView(Snapshot.Length == 0 ? 0 : (long)Offset * batch.ElementSize,
+            (long)Snapshot.Length * batch.ElementSize),
+        Snapshot.Length, rows, columns, elementSize: batch.ElementSize,
+        writes: transfers.Writes, dirtyIndex: DirtyIndex);
 
     /// <summary>Writes downloaded elements into the original host collection.</summary>
     /// <param name="values">The downloaded slice containing exactly this collection's elements.</param>

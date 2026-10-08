@@ -6,7 +6,7 @@ namespace ParallelGpu;
 
 /// <summary>Owns collection registration and device transfers for one compiled-loop invocation.</summary>
 /// <param name="gpu">The executor that owns all device allocations.</param>
-/// <remarks>Reference identity preserves aliases. Collections share one data buffer per numeric type
+/// <remarks>Reference identity preserves aliases. Collections share one data buffer per element type
 /// and common buffers for row metadata and write flags.</remarks>
 internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
 {
@@ -16,7 +16,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>Host collection wrappers keyed by reference identity so repeated captures share one device view.</summary>
     private readonly Dictionary<object, CapturedCollection> collections =
         new(ReferenceIdentityComparer.Instance);
-    /// <summary>Packed numeric buffers grouped by element type for the current invocation.</summary>
+    /// <summary>Packed device buffers grouped by element type for the current invocation.</summary>
     private readonly Dictionary<Type, CollectionBatch> batches = new();
     /// <summary>Row descriptors stored as consecutive offset, length, and write-flag index triples.</summary>
     private readonly List<int> rows = new();
@@ -32,32 +32,32 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>Gets the write flags used to select collections for host copy-back.</summary>
     internal ArrayView<int> Writes => writeBuffer?.View ?? default;
 
-    /// <summary>Registers a host collection using its runtime numeric element type.</summary>
+    /// <summary>Registers a host collection using its runtime supported element type.</summary>
     /// <param name="source">The host collection to register.</param>
-    /// <param name="elementType">The supported numeric element type.</param>
+    /// <param name="elementType">The supported supported element type.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
     internal CapturedCollection Add(object source, Type elementType) =>
         factories.GetOrAdd(elementType, CreateFactory)(this, source);
 
     /// <summary>Builds a typed registration delegate without reflection on individual jagged rows.</summary>
-    /// <param name="elementType">The numeric element type to bind.</param>
+    /// <param name="elementType">The supported element type to bind.</param>
     /// <returns>A registration delegate cached for that element type.</returns>
     private static Func<CollectionTransfers, object, CapturedCollection> CreateFactory(Type elementType) =>
         (Func<CollectionTransfers, object, CapturedCollection>)typeof(CollectionTransfers)
-            .GetMethod(nameof(AddNumeric), BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetMethod(nameof(AddTyped), BindingFlags.NonPublic | BindingFlags.Static)!
             .MakeGenericMethod(elementType)
             .CreateDelegate(typeof(Func<CollectionTransfers, object, CapturedCollection>));
 
     /// <summary>Adapts typed registration to the cached untyped factory signature.</summary>
-    /// <typeparam name="T">The numeric element type.</typeparam>
+    /// <typeparam name="T">The supported element type.</typeparam>
     /// <param name="transfers">The current invocation's registry.</param>
     /// <param name="source">The host collection to register.</param>
     /// <returns>The registered collection wrapper.</returns>
-    private static CapturedCollection AddNumeric<T>(CollectionTransfers transfers, object source)
+    private static CapturedCollection AddTyped<T>(CollectionTransfers transfers, object source)
         where T : unmanaged => transfers.Add<T>(source);
 
     /// <summary>Registers a typed host collection and reuses wrappers for existing aliases.</summary>
-    /// <typeparam name="T">The numeric element type.</typeparam>
+    /// <typeparam name="T">The supported element type.</typeparam>
     /// <param name="source">The host collection to register.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
     internal CapturedCollection Add<T>(object source) where T : unmanaged
@@ -73,7 +73,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     }
 
     /// <summary>Gets or creates the packed data batch for one element type.</summary>
-    /// <typeparam name="T">The numeric element type.</typeparam>
+    /// <typeparam name="T">The supported element type.</typeparam>
     /// <returns>The invocation's batch for that type.</returns>
     internal CollectionBatch<T> Batch<T>() where T : unmanaged
     {
@@ -104,7 +104,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
         return offset;
     }
 
-    /// <summary>Allocates write flags and uploads all registered row metadata and numeric data.</summary>
+    /// <summary>Allocates write flags and uploads all registered row metadata and element data.</summary>
     /// <remarks>Complete collection registration before calling this method.</remarks>
     internal void Upload()
     {

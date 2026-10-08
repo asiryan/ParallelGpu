@@ -10,8 +10,8 @@ public sealed partial class Gpu
     /// <summary>Compiles an ordinary C# loop body and executes it for each index in a half-open range.</summary>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
-    /// <param name="body">A numeric loop body using supported captured arrays and lists.</param>
-    /// <remarks>Supported collections include numeric flat, rectangular, and jagged arrays and lists.
+    /// <param name="body">A loop body using supported captured arrays and lists.</param>
+    /// <remarks>Supported collections include flat, rectangular, and jagged arrays and lists of numeric, Boolean, character, or enum elements.
     /// Captured collections are uploaded automatically; collections written to or exposed by reference
     /// are copied back before return. Aliases are preserved. Iterations are unordered and must be independent.
     /// Empty and reversed ranges do not compile or execute the body.</remarks>
@@ -22,8 +22,8 @@ public sealed partial class Gpu
     public void For(int fromInclusive, int toExclusive, Action<int> body) =>
         ForBody(fromInclusive, toExclusive, body, null);
 
-    /// <summary>Executes an ordinary loop body whose captured collections share one numeric element type.</summary>
-    /// <typeparam name="T">The supported numeric element type of every captured collection.</typeparam>
+    /// <summary>Executes an ordinary loop body whose captured collections share one supported element type.</summary>
+    /// <typeparam name="T">The element type of every captured collection: float, int, uint, long, ulong, double, short, ushort, byte, sbyte, bool, char, or an enum.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>

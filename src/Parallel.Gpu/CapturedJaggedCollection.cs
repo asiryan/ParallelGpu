@@ -1,9 +1,7 @@
-using ILGPU;
-
 namespace ParallelGpu;
 
 /// <summary>Represents a jagged array through shared leaf slices and packed row metadata.</summary>
-/// <typeparam name="T">The numeric row element type.</typeparam>
+/// <typeparam name="T">The supported row element type.</typeparam>
 /// <remarks>Repeated row references use the same leaf slice and write flag.</remarks>
 internal sealed class CapturedJaggedCollection<T> : CapturedCollection where T : unmanaged
 {
@@ -35,7 +33,7 @@ internal sealed class CapturedJaggedCollection<T> : CapturedCollection where T :
     }
 
     /// <inheritdoc/>
-    internal override DeviceCollection View => new(batch.View.Cast<byte>(), rowCount,
+    internal override DeviceCollection View => new(batch.View, rowCount,
         rowMetadata: rowCount == 0 ? default : transfers.Rows.SubView(rowOffset, checked(rowCount * 3)),
-        elementSize: Interop.SizeOf<T>(), writes: transfers.Writes);
+        elementSize: batch.ElementSize, writes: transfers.Writes);
 }
