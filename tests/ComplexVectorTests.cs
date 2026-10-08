@@ -17,8 +17,9 @@ public sealed class ComplexVectorTests(GpuFixture fixture)
         Assert.Equal(new Complex[] { new(1, 2), new(-3, 4) }, a);
         Assert.Equal(new Complex[] { new(5, 6), new(7, -8) }, b);
 
-        // These lengths cover empty and singleton vectors, incomplete batches, and three reduction passes.
-        foreach (int length in new[] { 0, 1, 255, 257, 65_537 })
+        // Cover batch groups with 1, 2, 31 and 32 lanes, incomplete groups, multiple
+        // reduction passes, and arrays large enough to use direct device transfers.
+        foreach (int length in new[] { 0, 1, 255, 257, 7_935, 7_937, 8_192, 8_193, 8_449, 65_537, 131_073 })
         {
             a = Vectors.Random(length, seed: 31);
             b = Vectors.Random(length, seed: 47);

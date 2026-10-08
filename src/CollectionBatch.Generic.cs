@@ -7,6 +7,8 @@ namespace ParallelGpu;
 /// <typeparam name="T">The host element type.</typeparam>
 internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
 {
+    /// <summary>The minimum average slice size for avoiding host packing without multiplying tiny transfers.</summary>
+    private const int MinimumDirectTransferBytes = 1024 * 1024;
     /// <summary>Leaf collections in packed-buffer order, allowing adjacent written slices to be downloaded together.</summary>
     private readonly List<CapturedCollection<T>> collections = new();
     /// <summary>The shared device buffer for elements with a native storage representation.</summary>
@@ -52,6 +54,15 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
             foreach (var collection in collections)
                 Pack(collection.Snapshot, padded.AsSpan(collection.Offset, collection.Snapshot.Length));
             paddedBuffer = gpu.Upload(padded);
+            return;
+        }
+        // Large collections can be copied directly into their slices, avoiding a second
+        // gigabyte-sized host allocation. Keep small collections packed to batch transfers.
+        if (mappedBuffer is null && (long)length * ElementSize >= (long)collections.Count * MinimumDirectTransferBytes)
+        {
+            buffer = gpu.Allocate<T>(length);
+            foreach (var collection in collections)
+                buffer.CopyFrom(collection.Offset, collection.Snapshot);
             return;
         }
         var packed = new T[length];
@@ -133,6 +144,15 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
                     break;
                 limit = next.Offset + next.Snapshot.Length;
                 end++;
+            }
+            if (end == first + 1)
+            {
+                // Flat-array snapshots already point to the destination; other collections
+                // reuse their snapshot instead of allocating another full-sized host array.
+                Download(collection.Offset, collection.Snapshot);
+                collection.Apply(collection.Snapshot);
+                first = end;
+                continue;
             }
             var result = new T[limit - collection.Offset];
             Download(collection.Offset, result);

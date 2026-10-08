@@ -8,6 +8,36 @@ public sealed class LambdaLoopTests(GpuFixture fixture)
     private Gpu Gpu => fixture.Gpu;
 
     [Fact]
+    public void LargeTransfersPreserveAliasesUntouchedElementsAndFreshHostValues()
+    {
+        // Each average leaf slice is over 1 MiB, including the empty jagged row.
+        int[] input = Enumerable.Range(0, 500_001).ToArray();
+        int[] output = Enumerable.Repeat(-1, 500_003).ToArray();
+        int[] alias = output;
+        int[][] rows = [input, output, alias, Array.Empty<int>()];
+        Action<int> body = i =>
+        {
+            rows[1][i] = input[i] * 2;
+            alias[i] += rows[3].Length + 1;
+        };
+
+        Gpu.For<int>(7, 258, body);
+        for (int i = 0; i < output.Length; i++)
+            Assert.Equal(i >= 7 && i < 258 ? i * 2 + 1 : -1, output[i]);
+        for (int i = 0; i < input.Length; i++)
+            Assert.Equal(i, input[i]);
+
+        input[17] = -42;
+        output[17] = 900;
+        Gpu.For<int>(7, 258, body);
+        Assert.Equal(-83, output[17]);
+        Assert.Equal(-42, input[17]);
+        Assert.Equal(-1, output[6]);
+        Assert.Equal(-1, output[258]);
+        Assert.Same(rows[1], rows[2]);
+    }
+
+    [Fact]
     public void FloatArraysSupportLocalsBranchesAndInnerLoops()
     {
         float[] left = [1, -2, 3];

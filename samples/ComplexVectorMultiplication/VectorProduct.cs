@@ -6,10 +6,13 @@ namespace ComplexVectorMultiplication;
 /// <summary>Computes sum(a[i] * b[i]) without conjugating either vector.</summary>
 public static class VectorProduct
 {
-    /// <summary>The number of adjacent products combined by each reduction iteration on either backend.</summary>
+    /// <summary>The maximum number of products combined by each iteration on either backend.</summary>
     internal const int BatchSize = 256;
 
-    /// <summary>Multiplies elements and reduces their sum with ordinary GPU loop bodies and automatic transfers.</summary>
+    /// <summary>Neighboring iterations read neighboring elements within each group of batches.</summary>
+    private const int BatchLanes = 32;
+
+    /// <summary>Combines multiplication and the first reduction pass with automatic array transfers.</summary>
     /// <param name="gpu">The executor used for multiplication and reduction.</param>
     /// <param name="a">The left vector, which remains unchanged.</param>
     /// <param name="b">The right vector, which remains unchanged.</param>
@@ -21,9 +24,20 @@ public static class VectorProduct
         if (length == 0)
             return Complex.Zero;
 
-        var products = new Complex[length];
-        gpu.For<Complex>(0, length, i => products[i] = a[i] * b[i]);
-        return ReduceOnGpu(gpu, products);
+        var sums = new Complex[BatchCount(length)];
+        gpu.For<Complex>(0, sums.Length, index =>
+        {
+            // Interleave each group so neighboring GPU threads load neighboring elements.
+            int group = index / BatchLanes * BatchLanes;
+            int stride = Math.Min(BatchLanes, sums.Length - group);
+            int start = group * BatchSize + index - group;
+            int count = Math.Min(BatchSize, 1 + (length - 1 - start) / stride);
+            Complex sum = Complex.Zero;
+            for (int i = 0; i < count; i++)
+                sum += a[start + i * stride] * b[start + i * stride];
+            sums[index] = sum;
+        });
+        return ReduceOnGpu(gpu, sums);
     }
 
     /// <summary>Multiplies elements and reduces their sum using the same batch order as the GPU.</summary>
@@ -36,9 +50,20 @@ public static class VectorProduct
         if (length == 0)
             return Complex.Zero;
 
-        var products = new Complex[length];
-        Parallel.For(0, length, i => products[i] = a[i] * b[i]);
-        return ReduceOnCpu(products);
+        var sums = new Complex[BatchCount(length)];
+        Parallel.For(0, sums.Length, index =>
+        {
+            // Interleave each group so neighboring GPU threads load neighboring elements.
+            int group = index / BatchLanes * BatchLanes;
+            int stride = Math.Min(BatchLanes, sums.Length - group);
+            int start = group * BatchSize + index - group;
+            int count = Math.Min(BatchSize, 1 + (length - 1 - start) / stride);
+            Complex sum = Complex.Zero;
+            for (int i = 0; i < count; i++)
+                sum += a[start + i * stride] * b[start + i * stride];
+            sums[index] = sum;
+        });
+        return ReduceOnCpu(sums);
     }
 
     /// <summary>Combines adjacent values until only the final sum remains, transferring arrays automatically.</summary>

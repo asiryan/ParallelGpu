@@ -74,6 +74,23 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Copies a host array into a contiguous range of the device buffer.</summary>
+    /// <param name="destinationOffset">The zero-based offset of the first destination element.</param>
+    /// <param name="source">The host array containing the elements to copy.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The requested range lies outside the buffer.</exception>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
+    internal void CopyFrom(int destinationOffset, T[] source)
+    {
+        lock (owner.SyncRoot)
+        {
+            ThrowIfDisposed();
+            if (destinationOffset < 0 || destinationOffset > Length || source.Length > Length - destinationOffset)
+                throw new ArgumentOutOfRangeException(nameof(destinationOffset));
+            if (source.Length > 0)
+                memory.View.BaseView.SubView(destinationOffset, source.Length).CopyFromCPU(source);
+        }
+    }
+
     /// <summary>Copies the entire buffer into an existing host array.</summary>
     /// <param name="destination">An array whose length equals <see cref="Length"/>.</param>
     /// <exception cref="ArgumentNullException">The destination array is null.</exception>
