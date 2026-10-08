@@ -247,7 +247,7 @@ Tests default to the ILGPU CPU backend for correctness checks. Set `PARALLEL_GPU
 
 ## Local performance measurements
 
-The final audit on 2026-10-08 used an Intel Core i7-13700KF, RTX 4070 Ti, NVIDIA driver 591.44, and .NET 8.0.31. All 182 tests passed in Debug and Release on both CPU and CUDA; both configurations built with warnings treated as errors. OpenCL was not exercised on this machine.
+The final audit on 2026-10-08 used an Intel Core i7-13700KF, RTX 4070 Ti, NVIDIA driver 591.44, and .NET 8.0.31. All 182 tests passed in Debug and Release on both CPU and CUDA; both configurations built with warnings treated as errors. An OpenCL verification attempt on this Windows machine was blocked during accelerator initialization: the RTX 4070 Ti reports OpenCL 3.0, OpenCL C 1.2, and no generic address-space support. ILGPU 1.5.3 requires generic address spaces and OpenCL C 2.0 or newer. No library kernels ran through OpenCL; verification needs a compatible device and driver.
 
 For 1,000,000 elements, the two independent optimized runs produced the following medians in milliseconds. Ranges describe those two medians, not confidence intervals. The compute map performs 32 dependent floating-point steps per element.
 
