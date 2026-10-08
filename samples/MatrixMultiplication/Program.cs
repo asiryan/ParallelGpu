@@ -6,14 +6,13 @@ using ParallelGpu;
 const int Rows = 2048;
 const int Inner = 2048;
 const int Columns = 2048;
-const GpuBackend Backend = GpuBackend.Auto;
 
 float[][] a = Matrices.Random(Rows, Inner, seed: 12345);
 float[][] b = Matrices.Random(Inner, Columns, seed: 67890);
 
 using var gpu = new Gpu(new GpuOptions
 {
-    Backend = Backend,
+    Backend = GpuBackend.Auto,
     AllowCpuFallback = true
 });
 
