@@ -1,4 +1,4 @@
-namespace MatrixMultiplication;
+namespace FloatMatrixMultiplication;
 
 /// <summary>Creates matrices and validates their dimensions and multiplication results.</summary>
 public static class Matrices

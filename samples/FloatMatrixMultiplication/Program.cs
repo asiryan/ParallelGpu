@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using MatrixMultiplication;
+using FloatMatrixMultiplication;
 using ParallelGpu;
 
 // Configure the sample here.

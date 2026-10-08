@@ -1,4 +1,4 @@
-using MatrixMultiplication;
+using FloatMatrixMultiplication;
 using Xunit;
 
 namespace ParallelGpu.Tests;

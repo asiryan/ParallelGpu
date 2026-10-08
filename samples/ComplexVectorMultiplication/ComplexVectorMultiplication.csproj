@@ -8,6 +8,6 @@
     <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Parallel.Gpu/Parallel.Gpu.csproj" />
+    <ProjectReference Include="../../src/Parallel.Gpu.csproj" />
   </ItemGroup>
 </Project>

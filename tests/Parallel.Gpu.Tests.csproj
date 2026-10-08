@@ -12,8 +12,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <ProjectReference Include="../../src/Parallel.Gpu/Parallel.Gpu.csproj" />
-    <ProjectReference Include="../../samples/MatrixMultiplication/MatrixMultiplication.csproj" />
-    <ProjectReference Include="../../samples/ComplexVectorMultiplication/ComplexVectorMultiplication.csproj" />
+    <ProjectReference Include="../src/Parallel.Gpu.csproj" />
+    <ProjectReference Include="../samples/FloatMatrixMultiplication/FloatMatrixMultiplication.csproj" />
+    <ProjectReference Include="../samples/ComplexVectorMultiplication/ComplexVectorMultiplication.csproj" />
   </ItemGroup>
 </Project>

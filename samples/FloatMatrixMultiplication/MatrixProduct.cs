@@ -1,6 +1,6 @@
 using ParallelGpu;
 
-namespace MatrixMultiplication;
+namespace FloatMatrixMultiplication;
 
 /// <summary>Computes compatible matrix products on the CPU or a selected accelerator.</summary>
 public static class MatrixProduct
