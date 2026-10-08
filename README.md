@@ -260,3 +260,6 @@ For 1,000,000 elements, the two independent optimized runs produced the followin
 The automatic path therefore remains slower than a sequential CPU loop for this cheap map, while the compute map is about four times faster than the measured `Parallel.For` reference including transfers. Reusing device buffers removes most of the map's transfer and setup cost. These are workload-specific measurements on a shared desktop GPU, not a general optimum or a performance guarantee.
 
 The audit removes redundant zeroing before complete uploads and reduction writes, singleton host staging, and separate shape tables for zero-based flat arrays. Public `Allocate<T>` still returns zero-filled storage. Automatic memory slices continue to transfer their full backing owner to preserve overlapping aliases; keeping buffers resident is the main remaining way to avoid repeated full-owner transfers.
+
+# License
+MIT
