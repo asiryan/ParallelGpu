@@ -14,5 +14,6 @@
     </PackageReference>
     <ProjectReference Include="../../src/Parallel.Gpu/Parallel.Gpu.csproj" />
     <ProjectReference Include="../../samples/MatrixMultiplication/MatrixMultiplication.csproj" />
+    <ProjectReference Include="../../samples/ComplexVectorMultiplication/ComplexVectorMultiplication.csproj" />
   </ItemGroup>
 </Project>
