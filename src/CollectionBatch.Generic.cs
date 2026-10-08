@@ -13,15 +13,19 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     private GpuBuffer<T>? buffer;
     /// <summary>The shared 32-bit storage used for Boolean and character elements.</summary>
     private GpuBuffer<int>? paddedBuffer;
+    /// <summary>Converted storage for structures needing a public blittable device mirror.</summary>
+    private readonly DeviceValueBuffer<T>? mappedBuffer =
+        !typeof(T).IsPrimitive && DeviceValueType.MapType(typeof(T)) != typeof(T)
+            ? DeviceValueBuffer<T>.Create() : null;
     /// <summary>The total reserved element count for this batch.</summary>
     private int length;
 
     /// <summary>Gets the shared byte view after the batch has been uploaded.</summary>
     internal ArrayView<byte> View => UsesPaddedStorage
-        ? paddedBuffer!.View.Cast<byte>() : buffer!.View.Cast<byte>();
+        ? paddedBuffer!.View.Cast<byte>() : mappedBuffer?.View ?? buffer!.View.Cast<byte>();
 
     /// <summary>Gets the physical distance between elements in bytes, including Boolean and character padding.</summary>
-    internal int ElementSize => UsesPaddedStorage ? sizeof(int) : Interop.SizeOf<T>();
+    internal int ElementSize => UsesPaddedStorage ? sizeof(int) : mappedBuffer?.ElementSize ?? Interop.SizeOf<T>();
 
     /// <summary>Gets whether the device requires aligned 32-bit slots for this host element type.</summary>
     private static bool UsesPaddedStorage => typeof(T) == typeof(bool) || typeof(T) == typeof(char);
@@ -53,7 +57,10 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
         var packed = new T[length];
         foreach (var collection in collections)
             collection.Snapshot.CopyTo(packed, collection.Offset);
-        buffer = gpu.Upload(packed);
+        if (mappedBuffer is not null)
+            mappedBuffer.Upload(gpu, packed);
+        else
+            buffer = gpu.Upload(packed);
     }
 
     /// <summary>Converts Boolean or UTF-16 character values into aligned device slots.</summary>
@@ -82,7 +89,10 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     {
         if (!UsesPaddedStorage)
         {
-            buffer!.CopyTo(offset, destination);
+            if (mappedBuffer is not null)
+                mappedBuffer.Download(offset, destination);
+            else
+                buffer!.CopyTo(offset, destination);
             return;
         }
         var padded = new int[destination.Length];
@@ -141,5 +151,6 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     {
         buffer?.Dispose();
         paddedBuffer?.Dispose();
+        mappedBuffer?.Dispose();
     }
 }

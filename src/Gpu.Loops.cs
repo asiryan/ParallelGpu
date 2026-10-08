@@ -11,9 +11,11 @@ public sealed partial class Gpu
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">A loop body using supported captured arrays and lists.</param>
-    /// <remarks>Supported collections include flat, rectangular, and jagged arrays and lists of numeric, Boolean, character, or enum elements.
+    /// <remarks>Supported collections include flat, rectangular, and jagged arrays and lists of primitive, enum, or device-compatible structure elements.
     /// Captured collections are uploaded automatically; collections written to or exposed by reference
     /// are copied back before return. Aliases are preserved. Iterations are unordered and must be independent.
+    /// Captured values are read-only; constructors, fields, operators, and device-compatible value methods are supported.
+    /// Structures must have no managed references; explicit layouts and native pointer fields are unsupported.
     /// Empty and reversed ranges do not compile or execute the body.</remarks>
     /// <exception cref="ArgumentNullException">The body is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
@@ -23,7 +25,7 @@ public sealed partial class Gpu
         ForBody(fromInclusive, toExclusive, body, null);
 
     /// <summary>Executes an ordinary loop body whose captured collections share one supported element type.</summary>
-    /// <typeparam name="T">The element type of every captured collection: float, int, uint, long, ulong, double, short, ushort, byte, sbyte, bool, char, or an enum.</typeparam>
+    /// <typeparam name="T">The element type of every captured collection: a primitive, enum, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>

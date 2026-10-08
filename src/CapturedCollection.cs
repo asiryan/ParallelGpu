@@ -8,11 +8,8 @@ internal abstract class CapturedCollection
 
     /// <summary>Checks whether a type is supported as a collection element.</summary>
     /// <param name="type">The candidate element type.</param>
-    /// <returns>True for supported numeric, Boolean, character, and enum types; otherwise, false.</returns>
-    internal static bool IsSupportedElementType(Type type) => type == typeof(float) || type == typeof(int) ||
-        type == typeof(uint) || type == typeof(long) || type == typeof(ulong) ||
-        type == typeof(double) || type == typeof(short) || type == typeof(ushort) ||
-        type == typeof(byte) || type == typeof(sbyte) || type == typeof(bool) || type == typeof(char) || type.IsEnum;
+    /// <returns>True for supported primitives, enums, and structures without managed references.</returns>
+    internal static bool IsSupportedElementType(Type type) => DeviceValueType.IsSupported(type);
 
     /// <summary>Finds the element type of a supported array or list declaration.</summary>
     /// <param name="type">The declared collection type.</param>

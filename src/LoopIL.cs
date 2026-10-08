@@ -17,7 +17,7 @@ internal static class LoopIL
     /// <param name="method">The ordinary managed method containing the loop body.</param>
     /// <returns>The decoded instructions in their original order.</returns>
     /// <exception cref="NotSupportedException">The body is unavailable, contains exception handlers, or uses an unsupported operand format.</exception>
-    internal static List<LoopInstruction> Read(MethodInfo method)
+    internal static List<LoopInstruction> Read(MethodBase method)
     {
         var body = method.GetMethodBody() ??
             throw new NotSupportedException("The loop body must have ordinary managed C# code.");
@@ -26,7 +26,7 @@ internal static class LoopIL
         var bytes = body.GetILAsByteArray()!;
         var module = method.Module;
         var typeArgs = method.DeclaringType?.GetGenericArguments();
-        var methodArgs = method.GetGenericArguments();
+        var methodArgs = method is MethodInfo info ? info.GetGenericArguments() : Type.EmptyTypes;
         var instructions = new List<LoopInstruction>();
         int position = 0;
         while (position < bytes.Length)

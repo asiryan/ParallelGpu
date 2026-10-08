@@ -9,7 +9,7 @@ public static class VectorProduct
     /// <summary>The number of adjacent products combined by each reduction iteration on either backend.</summary>
     internal const int BatchSize = 256;
 
-    /// <summary>Multiplies elements with ForEach and reduces their sum entirely on the selected device.</summary>
+    /// <summary>Multiplies elements and reduces their sum with ordinary GPU loop bodies and automatic transfers.</summary>
     /// <param name="gpu">The executor used for multiplication and reduction.</param>
     /// <param name="a">The left vector, which remains unchanged.</param>
     /// <param name="b">The right vector, which remains unchanged.</param>
@@ -21,9 +21,8 @@ public static class VectorProduct
         if (length == 0)
             return Complex.Zero;
 
-        using var products = gpu.Upload(a);
-        using var right = gpu.Upload(b);
-        gpu.ForEach(products, new MultiplyComplexKernel(right.View));
+        var products = new Complex[length];
+        gpu.For<Complex>(0, length, i => products[i] = a[i] * b[i]);
         return ReduceOnGpu(gpu, products);
     }
 
@@ -42,17 +41,25 @@ public static class VectorProduct
         return ReduceOnCpu(products);
     }
 
-    /// <summary>Combines adjacent device values until only the final sum remains.</summary>
-    /// <param name="gpu">The executor owning the reduction buffers.</param>
-    /// <param name="values">A nonempty device buffer containing products or partial sums.</param>
-    /// <returns>The single complex result downloaded after the last reduction pass.</returns>
-    private static Complex ReduceOnGpu(Gpu gpu, GpuBuffer<Complex> values)
+    /// <summary>Combines adjacent values until only the final sum remains, transferring arrays automatically.</summary>
+    /// <param name="gpu">The executor running the reduction loops.</param>
+    /// <param name="values">A nonempty array containing products or partial sums.</param>
+    /// <returns>The single complex result after the last reduction pass.</returns>
+    private static Complex ReduceOnGpu(Gpu gpu, Complex[] values)
     {
         if (values.Length == 1)
-            return values.ToArray()[0];
+            return values[0];
 
-        using var sums = gpu.Allocate<Complex>(BatchCount(values.Length));
-        gpu.For(0, sums.Length, new SumComplexKernel(values.View, sums.View));
+        var sums = new Complex[BatchCount(values.Length)];
+        gpu.For<Complex>(0, sums.Length, index =>
+        {
+            int start = index * BatchSize;
+            int count = Math.Min(BatchSize, values.Length - start);
+            Complex sum = Complex.Zero;
+            for (int i = 0; i < count; i++)
+                sum += values[start + i];
+            sums[index] = sum;
+        });
         return ReduceOnGpu(gpu, sums);
     }
 

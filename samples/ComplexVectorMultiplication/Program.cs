@@ -34,7 +34,7 @@ Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
 timer.Restart();
 Complex gpuResult = VectorProduct.MultiplyOnGpu(gpu, a, b);
 timer.Stop();
-Console.WriteLine($"{gpu.Backend} ForEach<Complex>, including reduction and array transfers: {timer.Elapsed.TotalMilliseconds:F3} ms");
+Console.WriteLine($"{gpu.Backend} For<Complex>, including reduction and array transfers: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
 double maxError = Vectors.CheckEqual(cpuResult, gpuResult);
 Console.WriteLine($"Result: {gpuResult}. Validation passed, maximum error: {maxError:G6}");

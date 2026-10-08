@@ -1,0 +1,134 @@
+using System.Reflection;
+using System.Reflection.Emit;
+
+namespace ParallelGpu;
+
+/// <summary>Prevents a captured value's address from being used to mutate host state or escape the loop.</summary>
+internal static class ReadOnlyCapture
+{
+    /// <summary>Checks the consumption of an address loaded from a closure value.</summary>
+    /// <param name="instructions">The original loop instructions.</param>
+    /// <param name="position">The instruction that loads the captured value's address.</param>
+    /// <exception cref="NotSupportedException">The address can be written, passed by reference, or escape.</exception>
+    internal static void Validate(List<LoopInstruction> instructions, int position)
+    {
+        // Follow branches while the address is live, tracking only the stack suffix above this capture.
+        var offsets = instructions.Select((instruction, index) => (instruction.Offset, index))
+            .ToDictionary(item => item.Offset, item => item.index);
+        var pending = new Queue<(int Position, List<bool> Stack)>();
+        var visited = new HashSet<string>();
+        pending.Enqueue((position + 1, new List<bool> { true }));
+        while (pending.Count > 0)
+        {
+            var (current, stack) = pending.Dequeue();
+            if (!stack.Contains(true))
+                continue;
+            if (current >= instructions.Count)
+                throw Unsupported();
+            string key = current + ":" + string.Concat(stack.Select(value => value ? '1' : '0'));
+            if (!visited.Add(key))
+                continue;
+            var instruction = instructions[current];
+            var code = instruction.Code;
+            if (code.FlowControl is FlowControl.Return or FlowControl.Throw)
+                throw Unsupported();
+            if (code == OpCodes.Dup)
+                stack.Add(stack[^1]);
+            else if (instruction.Operand is MethodBase called &&
+                (code == OpCodes.Call || code == OpCodes.Callvirt || code == OpCodes.Newobj))
+            {
+                foreach (var parameter in called.GetParameters())
+                    if (Pop(stack))
+                        throw Unsupported(); // A ref helper can mutate the capture even with a void result.
+                if (code != OpCodes.Newobj && !called.IsStatic && Pop(stack))
+                {
+                    if (called is not MethodInfo method || method.ReturnType.IsByRef ||
+                        !IsReadOnly(method, new HashSet<MethodInfo>()))
+                        throw Unsupported();
+                }
+                if (code == OpCodes.Newobj || called is MethodInfo info && info.ReturnType != typeof(void))
+                    stack.Add(false);
+            }
+            else if (code == OpCodes.Ldflda)
+            {
+                bool capture = Pop(stack);
+                stack.Add(capture);
+            }
+            else
+            {
+                bool usesCapture = false;
+                for (int j = 0; j < Count(code.StackBehaviourPop); j++)
+                    usesCapture |= Pop(stack);
+                // Reading through an address produces a value copy. Other uses can write or escape it.
+                if (usesCapture && code != OpCodes.Ldfld && code != OpCodes.Ldobj &&
+                    !code.Name!.StartsWith("ldind", StringComparison.Ordinal))
+                    throw Unsupported();
+                for (int j = 0; j < Count(code.StackBehaviourPush); j++)
+                    stack.Add(false);
+            }
+            if (code.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch)
+            {
+                var targets = instruction.Operand is int[] choices ? choices : [(int)instruction.Operand!];
+                foreach (int target in targets)
+                    pending.Enqueue((offsets[target], new List<bool>(stack)));
+                if (code.FlowControl == FlowControl.Branch)
+                    continue;
+            }
+            pending.Enqueue((current + 1, stack));
+        }
+    }
+
+    /// <summary>Pops a tracked reference, treating stack values below the capture as unrelated.</summary>
+    /// <param name="stack">The tracked suffix of the evaluation stack.</param>
+    /// <returns>True if the popped value is derived from the capture address.</returns>
+    private static bool Pop(List<bool> stack)
+    {
+        if (stack.Count == 0)
+            return false;
+        bool result = stack[^1];
+        stack.RemoveAt(stack.Count - 1);
+        return result;
+    }
+
+    /// <summary>Gets the operand count for a fixed stack behavior.</summary>
+    /// <param name="behavior">The opcode's stack behavior.</param>
+    /// <returns>The number of consumed or produced stack operands.</returns>
+    private static int Count(StackBehaviour behavior) => behavior is StackBehaviour.Pop0 or StackBehaviour.Push0
+        ? 0 : behavior.ToString().Split('_').Length;
+
+    /// <summary>Recognizes readonly members and simple instance helpers that only read value fields.</summary>
+    /// <param name="method">The instance method consuming the capture address.</param>
+    /// <param name="visited">The inspected method call graph.</param>
+    /// <returns>True when the method cannot mutate the receiver.</returns>
+    private static bool IsReadOnly(MethodInfo method, HashSet<MethodInfo> visited)
+    {
+        const string attribute = "System.Runtime.CompilerServices.IsReadOnlyAttribute";
+        if (method.CustomAttributes.Any(item => item.AttributeType.FullName == attribute) ||
+            method.DeclaringType!.CustomAttributes.Any(item => item.AttributeType.FullName == attribute))
+            return true;
+        var body = method.GetMethodBody();
+        if (!visited.Add(method) || body is null || body.ExceptionHandlingClauses.Count != 0)
+            return false;
+        try
+        {
+            return LoopIL.Read(method).All(instruction =>
+                instruction.Code != OpCodes.Stfld && instruction.Code != OpCodes.Stsfld &&
+                instruction.Code != OpCodes.Stobj && instruction.Code != OpCodes.Cpobj &&
+                instruction.Code != OpCodes.Initobj &&
+                !instruction.Code.Name!.StartsWith("stind", StringComparison.Ordinal) &&
+                (instruction.Operand is not MethodBase called ||
+                    (!called.GetParameters().Any(parameter => parameter.ParameterType.IsByRef) &&
+                        (called.IsStatic || called is ConstructorInfo ||
+                            called is MethodInfo instance && IsReadOnly(instance, new HashSet<MethodInfo>(visited))))));
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Creates the diagnostic for a writable or escaping captured-value address.</summary>
+    /// <returns>The unsupported-capture diagnostic.</returns>
+    private static NotSupportedException Unsupported() => new(
+        "Captured values are read-only inside GPU loops. Copy the value to a local variable or update a collection element.");
+}
