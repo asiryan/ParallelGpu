@@ -1,7 +1,14 @@
 namespace MatrixMultiplication;
 
+/// <summary>Creates matrices and validates their dimensions and multiplication results.</summary>
 public static class Matrices
 {
+    /// <summary>Creates a zero-filled matrix with independent rows of equal length.</summary>
+    /// <param name="rows">The positive number of rows.</param>
+    /// <param name="columns">The positive number of columns.</param>
+    /// <returns>A rectangular matrix represented by a jagged array.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Either dimension is zero or negative.</exception>
+    /// <exception cref="OverflowException">The element count exceeds Int32.MaxValue.</exception>
     public static float[][] Create(int rows, int columns)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
@@ -14,6 +21,13 @@ public static class Matrices
         return matrix;
     }
 
+    /// <summary>Creates a reproducible matrix with random values in [-1, 1).</summary>
+    /// <param name="rows">The positive number of rows.</param>
+    /// <param name="columns">The positive number of columns.</param>
+    /// <param name="seed">The random generator seed.</param>
+    /// <returns>A matrix containing the generated values.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Either dimension is zero or negative.</exception>
+    /// <exception cref="OverflowException">The element count exceeds Int32.MaxValue.</exception>
     public static float[][] Random(int rows, int columns, int seed)
     {
         float[][] matrix = Create(rows, columns);
@@ -24,6 +38,13 @@ public static class Matrices
         return matrix;
     }
 
+    /// <summary>Validates each matrix element with an absolute and relative tolerance.</summary>
+    /// <param name="expected">The CPU reference matrix.</param>
+    /// <param name="actual">The GPU result matrix.</param>
+    /// <returns>The maximum absolute element error.</returns>
+    /// <exception cref="ArgumentNullException">Either matrix is null.</exception>
+    /// <exception cref="ArgumentException">A matrix is empty or ragged, or the dimensions differ.</exception>
+    /// <exception cref="InvalidOperationException">An element is nonfinite or differs beyond tolerance.</exception>
     public static double CheckEqual(float[][] expected, float[][] actual)
     {
         var shape = Shape(expected, nameof(expected));
@@ -47,6 +68,13 @@ public static class Matrices
         return maxError;
     }
 
+    /// <summary>Validates matrix compatibility and determines the multiplication dimensions.</summary>
+    /// <param name="a">The left matrix.</param>
+    /// <param name="b">The right matrix.</param>
+    /// <returns>The output row count, shared inner dimension, and output column count.</returns>
+    /// <exception cref="ArgumentNullException">Either matrix is null.</exception>
+    /// <exception cref="ArgumentException">A matrix is empty or ragged, or the inner dimensions differ.</exception>
+    /// <exception cref="OverflowException">The output element count exceeds Int32.MaxValue.</exception>
     internal static (int Rows, int Inner, int Columns) ProductShape(float[][] a, float[][] b)
     {
         var left = Shape(a, nameof(a));
@@ -57,6 +85,12 @@ public static class Matrices
         return (left.Rows, left.Columns, right.Columns);
     }
 
+    /// <summary>Checks that a jagged array represents a nonempty rectangular matrix.</summary>
+    /// <param name="matrix">The matrix to validate.</param>
+    /// <param name="name">The parameter name included in validation exceptions.</param>
+    /// <returns>The common row and column counts.</returns>
+    /// <exception cref="ArgumentNullException">The matrix is null.</exception>
+    /// <exception cref="ArgumentException">The matrix is empty, contains a null row, or has inconsistent row lengths.</exception>
     private static (int Rows, int Columns) Shape(float[][] matrix, string name)
     {
         ArgumentNullException.ThrowIfNull(matrix, name);
