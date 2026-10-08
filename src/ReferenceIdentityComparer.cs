@@ -2,10 +2,10 @@ using System.Runtime.CompilerServices;
 
 namespace ParallelGpu;
 
-/// <summary>Compares captured host collections by object identity to preserve aliases.</summary>
+/// <summary>Compares host objects by reference identity to preserve aliases.</summary>
 internal sealed class ReferenceIdentityComparer : IEqualityComparer<object>
 {
-    /// <summary>The shared comparer used by collection transfer registries.</summary>
+    /// <summary>The shared comparer for collection and graph identity registries.</summary>
     internal static readonly ReferenceIdentityComparer Instance = new();
 
     /// <summary>Creates the singleton identity comparer.</summary>

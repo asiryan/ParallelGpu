@@ -17,7 +17,8 @@ internal sealed class LambdaKernel
     /// <param name="StateType">The public generated kernel state.</param>
     /// <param name="Captures">The host capture paths and their generated fields.</param>
     /// <param name="Entry">The generated ILGPU entry point.</param>
-    private sealed record TranslatedBody(Type StateType, LoopCapture[] Captures, MethodInfo Entry);
+    /// <param name="ScratchElementSize">Bytes reserved per iteration for safe invalid reference targets.</param>
+    private sealed record TranslatedBody(Type StateType, LoopCapture[] Captures, MethodInfo Entry, int ScratchElementSize);
 
     /// <summary>The generated value type containing device views and captured scalar values.</summary>
     private readonly Type stateType;
@@ -25,16 +26,19 @@ internal sealed class LambdaKernel
     private readonly LoopCapture[] captures;
     /// <summary>The accelerator-bound launcher accepting an iteration count, lower bound, and boxed state.</summary>
     private readonly Action<int, int, object> launch;
+    private readonly int scratchElementSize;
 
     /// <summary>Stores the generated state type, capture mappings, and bound kernel launcher.</summary>
     /// <param name="stateType">The generated value type used for kernel arguments.</param>
     /// <param name="captures">Mappings from host fields to state fields.</param>
     /// <param name="launch">The bound device launcher.</param>
-    private LambdaKernel(Type stateType, LoopCapture[] captures, Action<int, int, object> launch)
+    /// <param name="scratchElementSize">Bytes reserved per iteration for deferred reference failures.</param>
+    private LambdaKernel(Type stateType, LoopCapture[] captures, Action<int, int, object> launch, int scratchElementSize)
     {
         this.stateType = stateType;
         this.captures = captures;
         this.launch = launch;
+        this.scratchElementSize = scratchElementSize;
     }
 
     /// <summary>Rejects collection element types containing unsupported fields or managed references.</summary>
@@ -54,46 +58,56 @@ internal sealed class LambdaKernel
     /// <param name="start">The inclusive lower bound of the loop range.</param>
     /// <param name="count">The positive number of iterations to launch.</param>
     /// <param name="expectedElement">The required collection element type, or null for mixed types.</param>
-    /// <exception cref="ArgumentException">A capture is null or has an unexpected collection element type.</exception>
+    /// <exception cref="ArgumentException">An intermediate capture object is null or a collection has an unexpected element type.</exception>
     /// <exception cref="NotSupportedException">A captured runtime collection is unsupported.</exception>
     internal void Execute(Gpu gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
-        var state = Activator.CreateInstance(stateType)!;
-        using var transfers = new CollectionTransfers(gpu);
-
-        // Validate every capture before allocating memory or launching the kernel.
+        // Validate collection types and native view ownership before device allocation.
         var values = captures.Select(capture => capture.Read(body.Target)).ToArray();
         for (int i = 0; i < captures.Length; i++)
         {
             var capture = captures[i];
+            if (values[i] is IDeviceNativeView nativeView)
+                nativeView.ValidateOwner(gpu);
             if (capture.Element is not null && expectedElement is not null &&
                 capture.Element != expectedElement)
                 throw new ArgumentException(
                     $"Captured collection '{capture.Path[^1].Name}' contains {capture.Element.Name}, " +
                     $"but For<{expectedElement.Name}> requires that element type. " +
                     "Use the non-generic For overload for mixed collection types.", nameof(body));
-            if (capture.Element is not null && values[i] is not Array &&
-                (!values[i].GetType().IsGenericType ||
-                 values[i].GetType().GetGenericTypeDefinition() != typeof(List<>)))
+            if (capture.Element is not null && values[i] is not null && values[i] is not Array &&
+                !GpuCollectionAdapters.SupportsRuntime(values[i]!.GetType()) &&
+                (!values[i]!.GetType().IsGenericType ||
+                 values[i]!.GetType().GetGenericTypeDefinition() != typeof(List<>)))
                 throw new NotSupportedException(
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
         }
+        var state = Activator.CreateInstance(stateType)!;
+        using var errors = gpu.Allocate<int>(1);
+        using var transfers = new CollectionTransfers(gpu);
         for (int i = 0; i < captures.Length; i++)
             if (captures[i].Element is Type element)
-                values[i] = transfers.Add(values[i], element);
+                values[i] = transfers.Add(values[i]!, element);
+        // All supported primitive leaves require at most eight-byte alignment.
+        int scratchStride = checked((scratchElementSize + 7) & ~7);
+        using var scratch = gpu.Allocate<byte>(checked(count * scratchStride));
+        var execution = new DeviceExecutionContext(errors.View, scratch.View, scratchStride);
+        transfers.Context = execution;
         transfers.Upload();
+        stateType.GetField("Context")!.SetValue(state, execution);
         for (int i = 0; i < captures.Length; i++)
             captures[i].Destination.SetValue(state,
                 values[i] switch
                 {
                     CapturedCollection collection => collection.View,
-                    bool value => value ? 1 : 0,
-                    char value => (int)value,
+                    bool value when captures[i].Path[^1].FieldType == typeof(bool) => value ? 1 : 0,
+                    char value when captures[i].Path[^1].FieldType == typeof(char) => (int)value,
                     _ => DeviceValueType.ToDevice(values[i], captures[i].Path[^1].FieldType)
                 });
 
         launch(count, start, state);
         gpu.Synchronize();
+        DeviceExecutionContext.ThrowIfFailed(errors.ToArray()[0]);
         transfers.CopyBack();
     }
 
@@ -111,7 +125,7 @@ internal sealed class LambdaKernel
             var loader = typeof(LambdaKernel).GetMethod(nameof(Load), BindingFlags.NonPublic | BindingFlags.Static)!
                 .MakeGenericMethod(translated.StateType);
             var launch = (Action<int, int, object>)loader.Invoke(null, [accelerator, translated.Entry])!;
-            return new(translated.StateType, translated.Captures, launch);
+            return new(translated.StateType, translated.Captures, launch, translated.ScratchElementSize);
         }
         catch (TargetInvocationException error) when (error.InnerException is not null)
         {
@@ -130,6 +144,7 @@ internal sealed class LambdaKernel
     {
         var instructions = LoopIL.Read(source);
         var sourceBody = source.GetMethodBody()!;
+        var stackTypes = LoopStackTypes.Analyze(source, instructions);
         var assembly = AssemblyBuilder.DefineDynamicAssembly(
             new AssemblyName("ParallelGpu.Loop." + Guid.NewGuid().ToString("N")),
             AssemblyBuilderAccess.Run);
@@ -146,9 +161,11 @@ internal sealed class LambdaKernel
         var scalarMethods = new ScalarMethodTranslator(module);
         var state = module.DefineType("LoopState", TypeAttributes.Public | TypeAttributes.Sealed |
             TypeAttributes.SequentialLayout, typeof(ValueType));
+        var contextField = state.DefineField("Context", typeof(DeviceExecutionContext), FieldAttributes.Public);
         var body = state.DefineMethod("Body", MethodAttributes.Public | MethodAttributes.Static,
             typeof(void), [state.MakeByRefType(), typeof(int)]);
         var il = body.GetILGenerator();
+        Action<ILGenerator> emitContext = target => { target.Emit(OpCodes.Ldarg_0); target.Emit(OpCodes.Ldfld, contextField); };
         foreach (var local in sourceBody.LocalVariables)
         {
             if (local.IsPinned)
@@ -197,7 +214,7 @@ internal sealed class LambdaKernel
                 }
                 bool address = instructions[i].Code == OpCodes.Ldflda;
                 if (address)
-                    ReadOnlyCapture.Validate(instructions, i);
+                    ReadOnlyCapture.Validate(instructions, i, capture.Element is not null);
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, capture.Field);
                 if (address)
@@ -226,19 +243,32 @@ internal sealed class LambdaKernel
                     ? OpCodes.Starg : OpCodes.Ldarga, (short)1);
                 continue;
             }
+            if (instruction.Code == OpCodes.Initobj && instruction.Operand is Type initialized &&
+                initialized.IsValueType && CapturedCollection.ElementType(initialized) is not null)
+            {
+                emitContext(il);
+                il.Emit(OpCodes.Call, typeof(DeviceCollectionSlice).GetMethod(nameof(DeviceCollectionSlice.Initialize))!);
+                continue;
+            }
+            if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
+                LoopStackTypes.TryEmitReferenceOperation(il, instruction, stack, labels, emitContext))
+                continue;
+            if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
+                ScalarMethodTranslator.TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
+                continue;
             if (TryArrayOperation(il, instruction))
                 continue;
             if (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt)
             {
                 if (instruction.Operand is ConstructorInfo constructor)
-                    scalarMethods.EmitConstructor(il, instruction.Code, constructor);
+                    scalarMethods.EmitConstructor(il, instruction.Code, constructor, emitContext);
                 else
-                    EmitCall(il, (MethodInfo)instruction.Operand!, scalarMethods);
+                    scalarMethods.EmitCall(il, (MethodInfo)instruction.Operand!, emitContext);
                 continue;
             }
             if (instruction.Code == OpCodes.Newobj)
             {
-                scalarMethods.EmitConstructor(il, instruction.Code, (ConstructorInfo)instruction.Operand!);
+                scalarMethods.EmitConstructor(il, instruction.Code, (ConstructorInfo)instruction.Operand!, emitContext);
                 continue;
             }
             if (instruction.Code == OpCodes.Ldfld || instruction.Code == OpCodes.Ldflda ||
@@ -252,16 +282,8 @@ internal sealed class LambdaKernel
             }
             if (instruction.Code == OpCodes.Readonly)
                 continue; // The replacement for ldelema is an ordinary ref-returning method.
-            if (instruction.Code == OpCodes.Newarr ||
-                instruction.Code == OpCodes.Box || instruction.Code == OpCodes.Unbox ||
-                instruction.Code == OpCodes.Unbox_Any || instruction.Code == OpCodes.Castclass ||
-                instruction.Code == OpCodes.Isinst || instruction.Code == OpCodes.Throw ||
-                instruction.Code == OpCodes.Rethrow ||
-                instruction.Code == OpCodes.Stsfld || instruction.Code == OpCodes.Ldsflda ||
-                instruction.Code == OpCodes.Ldnull || instruction.Code == OpCodes.Ldftn ||
-                instruction.Code == OpCodes.Ldvirtftn || instruction.Code == OpCodes.Ldtoken ||
-                instruction.Code == OpCodes.Calli || instruction.Code == OpCodes.Constrained)
-                throw Unsupported($"Instruction '{instruction.Code.Name}'");
+            DeviceInstructionValidation.Validate(instruction);
+
             LoopIL.Emit(il, instruction.Operand is Type operandType
                 ? instruction with { Operand = ScalarMethodTranslator.MapType(operandType) } : instruction, labels);
         }
@@ -270,6 +292,23 @@ internal sealed class LambdaKernel
         var entry = state.DefineMethod("Execute", MethodAttributes.Public | MethodAttributes.Static,
             typeof(void), [typeof(Index1D), typeof(int), state]);
         var entryIL = entry.GetILGenerator();
+        entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
+        entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
+        entryIL.Emit(OpCodes.Ldfld, contextField);
+        entryIL.Emit(OpCodes.Ldarga_S, (byte)0);
+        entryIL.Emit(OpCodes.Call, typeof(Index1D).GetProperty(nameof(Index1D.X))!.GetMethod!);
+        entryIL.Emit(OpCodes.Call, typeof(DeviceExecutionContext).GetMethod(nameof(DeviceExecutionContext.WithThread))!);
+        entryIL.Emit(OpCodes.Stfld, contextField);
+        foreach (var capture in paths.Values.Where(capture => capture.Element is not null))
+        {
+            entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
+            entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
+            entryIL.Emit(OpCodes.Ldfld, capture.Field);
+            entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
+            entryIL.Emit(OpCodes.Ldfld, contextField);
+            entryIL.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod("WithContext")!);
+            entryIL.Emit(OpCodes.Stfld, capture.Field);
+        }
         entryIL.Emit(OpCodes.Ldarga_S, (byte)2);
         entryIL.Emit(OpCodes.Ldarg_1);
         entryIL.Emit(OpCodes.Ldarga_S, (byte)0);
@@ -281,7 +320,7 @@ internal sealed class LambdaKernel
         var stateType = state.CreateType()!;
         var captures = paths.Values.Select(capture => new LoopCapture(capture.Path,
             stateType.GetField(capture.Field.Name)!, capture.Element)).ToArray();
-        return new(stateType, captures, stateType.GetMethod("Execute")!);
+        return new(stateType, captures, stateType.GetMethod("Execute")!, ScratchElementSize(source, new HashSet<MethodBase>()));
     }
 
     /// <summary>Binds the generated entry point to a strongly typed ILGPU launcher.</summary>
@@ -306,7 +345,7 @@ internal sealed class LambdaKernel
     /// <summary>Checks whether a type can be used as a numeric or simple scalar value.</summary>
     /// <param name="type">The candidate scalar type.</param>
     /// <returns>True for supported primitives, enums, and structures without managed references.</returns>
-    private static bool IsScalar(Type type) => CapturedCollection.IsSupportedElementType(type);
+    private static bool IsScalar(Type type) => CapturedCollection.IsSupportedElementType(type) || DeviceNativeTypes.IsSupported(type);
 
     /// <summary>Maps captured Boolean and character scalars to blittable kernel argument fields.</summary>
     /// <param name="type">The captured scalar or collection type.</param>
@@ -320,6 +359,8 @@ internal sealed class LambdaKernel
     private static Type MapType(Type type)
     {
         type = ScalarMethodTranslator.MapType(type);
+        if (type == typeof(DeviceCollection) || type == typeof(DeviceCollection).MakeByRefType())
+            return type;
         if (CapturedCollection.ElementType(type) is not null)
             return typeof(DeviceCollection);
         if (IsScalar(type) || (type.IsByRef && IsScalar(type.GetElementType()!)))
@@ -336,7 +377,7 @@ internal sealed class LambdaKernel
     /// <param name="il">The destination IL generator.</param>
     /// <param name="instruction">The decoded array instruction to inspect.</param>
     /// <returns>True if the instruction was recognized and emitted; otherwise, false.</returns>
-    private static bool TryArrayOperation(ILGenerator il, LoopInstruction instruction)
+    internal static bool TryArrayOperation(ILGenerator il, LoopInstruction instruction)
     {
         var code = instruction.Code;
         if (code == OpCodes.Ldelem_Ref)
@@ -383,72 +424,29 @@ internal sealed class LambdaKernel
         return true;
     }
 
-    /// <summary>Rewrites collection calls and preserves supported device-compatible scalar calls.</summary>
-    /// <param name="il">The destination IL generator.</param>
-    /// <param name="method">The source method referenced by the call instruction.</param>
-    /// <param name="scalarMethods">The translator preserving character values in scalar helper calls.</param>
-    private static void EmitCall(ILGenerator il, MethodInfo method, ScalarMethodTranslator scalarMethods)
+    private static int ScratchElementSize(MethodBase method, HashSet<MethodBase> visited)
     {
-        var declaringType = method.DeclaringType!;
-        if (declaringType.IsArray && declaringType.GetArrayRank() == 2 &&
-            CapturedCollection.ElementType(declaringType) is Type matrixElement)
+        if (!visited.Add(method) || method.GetMethodBody() is null || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
+            return 0;
+        List<LoopInstruction> instructions;
+        try { instructions = LoopIL.Read(method); }
+        catch (NotSupportedException) { return 0; }
+        int size = 0;
+        foreach (var instruction in instructions)
         {
-            string name = method.Name switch
+            Type? element = instruction.Code == OpCodes.Ldelema ? (Type)instruction.Operand! : null;
+            if (instruction.Operand is MethodInfo called)
             {
-                "Get" => nameof(DeviceCollection.Read2D),
-                "Set" => nameof(DeviceCollection.Write2D),
-                "Address" => nameof(DeviceCollection.Address2D),
-                _ => throw Unsupported($"Array method '{method.Name}'")
-            };
-            il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(name)!.MakeGenericMethod(MapElementValueType(matrixElement)));
-            return;
-        }
-        if (declaringType == typeof(Array))
-        {
-            string name = method.Name switch
-            {
-                "get_Length" => nameof(DeviceCollection.Count),
-                "get_LongLength" => nameof(DeviceCollection.LongCount),
-                "GetLength" => nameof(DeviceCollection.GetLength),
-                "GetLongLength" => nameof(DeviceCollection.GetLongLength),
-                _ => throw Unsupported($"Array method '{method.Name}'")
-            };
-            il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(name)!);
-            return;
-        }
-        if (declaringType.IsGenericType)
-        {
-            var definition = declaringType.GetGenericTypeDefinition();
-            if (definition == typeof(List<>) || definition == typeof(IList<>) ||
-                definition == typeof(IReadOnlyList<>) || definition == typeof(ICollection<>) ||
-                definition == typeof(IReadOnlyCollection<>))
-            {
-                var element = declaringType.GetGenericArguments()[0];
-                ValidateElementType(element);
-                string name = method.Name switch
-                {
-                    "get_Item" => nameof(DeviceCollection.Read),
-                    "set_Item" => nameof(DeviceCollection.Write),
-                    "get_Count" => nameof(DeviceCollection.Count),
-                    _ => throw Unsupported($"Collection method '{method.Name}'")
-                };
-                var replacement = typeof(DeviceCollection).GetMethod(name)!;
-                if (replacement.IsGenericMethodDefinition)
-                    replacement = replacement.MakeGenericMethod(MapElementValueType(element));
-                il.Emit(OpCodes.Call, replacement);
-                return;
+                if (called.ReturnType.IsByRef && CapturedCollection.ElementType(called.DeclaringType!) is not null)
+                    element = called.ReturnType.GetElementType();
+                else
+                    size = Math.Max(size, ScratchElementSize(called, visited));
             }
+            if (element is not null && DeviceValueType.IsSupported(element))
+                size = Math.Max(size, Interop.SizeOf(DeviceValueType.MapType(element)));
         }
-        // Collection instance calls were replaced above; remaining helpers must use device-value signatures.
-        if ((!method.IsStatic && !IsScalar(declaringType)) ||
-            method.GetParameters().Any(parameter => !IsScalar(
-                parameter.ParameterType.IsByRef ? parameter.ParameterType.GetElementType()! : parameter.ParameterType)) ||
-            (method.ReturnType != typeof(void) && !IsScalar(method.ReturnType.IsByRef
-                ? method.ReturnType.GetElementType()! : method.ReturnType)))
-            throw Unsupported($"Method '{declaringType.FullName}.{method.Name}'");
-        il.Emit(OpCodes.Call, scalarMethods.Translate(method));
+        return size;
     }
-
     /// <summary>Creates an exception identifying a feature unavailable inside GPU loop bodies.</summary>
     /// <param name="feature">The unsupported feature or operation.</param>
     /// <returns>An exception describing the unsupported feature and loop restrictions.</returns>

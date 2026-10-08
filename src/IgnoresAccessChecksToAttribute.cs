@@ -1,6 +1,6 @@
 namespace System.Runtime.CompilerServices;
 
-/// <summary>Allows generated loop assemblies to access the original body's private scalar helpers.</summary>
+/// <summary>Allows generated assemblies to access private helpers and value fields in a named assembly.</summary>
 /// <param name="assemblyName">The simple name of the assembly whose access checks are relaxed.</param>
 /// <remarks>The CLR recognizes this attribute by its fully qualified name.</remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]

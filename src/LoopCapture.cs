@@ -10,14 +10,16 @@ internal sealed record LoopCapture(FieldInfo[] Path, FieldInfo Destination, Type
 {
     /// <summary>Reads the current captured value by following the original field path.</summary>
     /// <param name="target">The current delegate closure, or null for a static body.</param>
-    /// <returns>The non-null captured value.</returns>
-    /// <exception cref="ArgumentException">A captured object or collection is null.</exception>
-    internal object Read(object? target)
+    /// <returns>The captured value, including null for a nullable value or collection.</returns>
+    /// <exception cref="ArgumentException">An intermediate capture object is null or a required value is missing.</exception>
+    internal object? Read(object? target)
     {
         object? value = target;
         foreach (var field in Path)
             value = field.GetValue(field.IsStatic ? null : value ??
                 throw new ArgumentException("A captured object is null.", "body"));
+        if (Element is not null || Nullable.GetUnderlyingType(Path[^1].FieldType) is not null)
+            return value;
         return value ?? throw new ArgumentException(
             $"Captured collection '{Path[^1].Name}' is null.", "body");
     }

@@ -10,33 +10,50 @@ public sealed partial class Gpu
     /// <summary>Compiles an ordinary C# loop body and executes it for each index in a half-open range.</summary>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
-    /// <param name="body">A loop body using supported captured arrays and lists.</param>
-    /// <remarks>Supported collections include flat, rectangular, and jagged arrays and lists of primitive, enum, or device-compatible structure elements.
-    /// Captured collections are uploaded automatically; collections written to or exposed by reference
-    /// are copied back before return. Aliases are preserved. Iterations are unordered and must be independent.
-    /// Captured values are read-only; constructors, fields, operators, and device-compatible value methods are supported.
-    /// Structures must have no managed references; explicit layouts and native pointer fields are unsupported.
-    /// Empty and reversed ranges do not compile or execute the body.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
-    /// <exception cref="NotSupportedException">The body or a captured collection is not supported by the device compiler.</exception>
-    /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
+    /// <param name="body">A loop body using supported values, collections, helpers, and GPU views.</param>
+    /// <remarks>
+    /// <para>Collections include rectangular arrays of any CLR-supported rank, nested and mixed arrays,
+    /// lists, memory slices, and registered adapters. Elements may be supported primitives, enums, nullable values,
+    /// or structures without managed references. Aliases and array lower bounds are preserved.
+    /// Constructors and compatible helpers accept values and collections. Captured descriptors and scalar values
+    /// are read-only. Explicit layouts and native pointer fields are unsupported.</para>
+    /// <para>Captures are refreshed on every call. Deferred loop errors are checked before automatic host
+    /// copyback and adapter commits. Empty and reversed ranges skip compilation and execution.</para>
+    /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
+    /// Captured append and graph views must be live and owned by this executor. Their result APIs check their
+    /// own deferred errors, and their device writes are not rolled back on a loop failure.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The body is null, or a three-argument ArraySegment constructor receives a null array.</exception>
+    /// <exception cref="ArgumentException">A captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// <exception cref="NotSupportedException">The body uses unsupported operations, including checked integer arithmetic or conversions, or a captured collection is unsupported.</exception>
+    /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
+    /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
+    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
+    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
+    /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
+    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
     public void For(int fromInclusive, int toExclusive, Action<int> body) =>
         ForBody(fromInclusive, toExclusive, body, null);
 
     /// <summary>Executes an ordinary loop body whose captured collections share one supported element type.</summary>
-    /// <typeparam name="T">The element type of every captured collection: a primitive, enum, or device-compatible structure without managed references.</typeparam>
+    /// <typeparam name="T">The ultimate element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>Use the non-generic overload for mixed collection element types.
     /// Compilation and transfers are automatic, and results are available on return.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null.</exception>
-    /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
-    /// <exception cref="NotSupportedException">The element type, body, or a captured collection is unsupported.</exception>
-    /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
-    public void For<T>(int fromInclusive, int toExclusive, Action<int> body) where T : unmanaged
+    /// <exception cref="ArgumentNullException">The body is null, or a three-argument ArraySegment constructor receives a null array.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type, a captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// <exception cref="NotSupportedException">The element type, body, or captured collection is unsupported, including checked integer arithmetic or conversions.</exception>
+    /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
+    /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
+    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
+    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
+    /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
+    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
+    public void For<T>(int fromInclusive, int toExclusive, Action<int> body)
     {
         LambdaKernel.ValidateElementType(typeof(T));
         ForBody(fromInclusive, toExclusive, body, typeof(T));
@@ -75,4 +92,3 @@ public sealed partial class Gpu
     /// <summary>Waits for all pending work on the accelerator to complete.</summary>
     internal void Synchronize() => accelerator.Synchronize();
 }
-

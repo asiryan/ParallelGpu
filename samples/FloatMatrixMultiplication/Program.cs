@@ -2,7 +2,6 @@ using System.Diagnostics;
 using FloatMatrixMultiplication;
 using ParallelGpu;
 
-// Configure the sample here.
 const int Rows = 2048;
 const int Inner = 2048;
 const int Columns = 2048;
@@ -18,17 +17,15 @@ using var gpu = new Gpu(new GpuOptions
 
 Console.WriteLine($"A: {Rows} x {Inner}, B: {Inner} x {Columns}");
 
-// Warm up both methods; exclude the initial GPU kernel compilation from timing.
+// Exclude initial CPU JIT and accelerator kernel compilation from timing.
 MatrixProduct.MultiplyOnCpu(a, b);
 MatrixProduct.MultiplyOnGpu(gpu, a, b);
 
-// CPU
 var timer = Stopwatch.StartNew();
 float[][] cpuResult = MatrixProduct.MultiplyOnCpu(a, b);
 timer.Stop();
 Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
-// GPU
 Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
 
 timer.Restart();

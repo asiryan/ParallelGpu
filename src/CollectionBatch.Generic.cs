@@ -1,33 +1,28 @@
-using System.Runtime.InteropServices;
 using ILGPU;
 
 namespace ParallelGpu;
 
 /// <summary>Packs leaf collections of one supported type into a contiguous device buffer.</summary>
 /// <typeparam name="T">The host element type.</typeparam>
-internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
+internal sealed class CollectionBatch<T> : CollectionBatch
 {
     /// <summary>The minimum average slice size for avoiding host packing without multiplying tiny transfers.</summary>
     private const int MinimumDirectTransferBytes = 1024 * 1024;
     /// <summary>Leaf collections in packed-buffer order, allowing adjacent written slices to be downloaded together.</summary>
     private readonly List<CapturedCollection<T>> collections = new();
-    /// <summary>The shared device buffer for elements with a native storage representation.</summary>
-    private GpuBuffer<T>? buffer;
     /// <summary>The shared 32-bit storage used for Boolean and character elements.</summary>
     private GpuBuffer<int>? paddedBuffer;
-    /// <summary>Converted storage for structures needing a public blittable device mirror.</summary>
-    private readonly DeviceValueBuffer<T>? mappedBuffer =
-        !typeof(T).IsPrimitive && DeviceValueType.MapType(typeof(T)) != typeof(T)
-            ? DeviceValueBuffer<T>.Create() : null;
+    /// <summary>Runtime-bound native or mirrored storage; host nullable types need no unmanaged generic constraint.</summary>
+    private readonly DeviceValueBuffer<T>? valueBuffer = UsesPaddedStorage ? null : DeviceValueBuffer<T>.Create();
     /// <summary>The total reserved element count for this batch.</summary>
     private int length;
 
     /// <summary>Gets the shared byte view after the batch has been uploaded.</summary>
     internal ArrayView<byte> View => UsesPaddedStorage
-        ? paddedBuffer!.View.Cast<byte>() : mappedBuffer?.View ?? buffer!.View.Cast<byte>();
+        ? paddedBuffer!.View.Cast<byte>() : valueBuffer!.View;
 
     /// <summary>Gets the physical distance between elements in bytes, including Boolean and character padding.</summary>
-    internal int ElementSize => UsesPaddedStorage ? sizeof(int) : mappedBuffer?.ElementSize ?? Interop.SizeOf<T>();
+    internal int ElementSize => UsesPaddedStorage ? sizeof(int) : valueBuffer!.ElementSize;
 
     /// <summary>Gets whether the device requires aligned 32-bit slots for this host element type.</summary>
     private static bool UsesPaddedStorage => typeof(T) == typeof(bool) || typeof(T) == typeof(char);
@@ -56,38 +51,41 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
             paddedBuffer = gpu.Upload(padded);
             return;
         }
-        // Large collections can be copied directly into their slices, avoiding a second
-        // gigabyte-sized host allocation. Keep small collections packed to batch transfers.
-        if (mappedBuffer is null && (long)length * ElementSize >= (long)collections.Count * MinimumDirectTransferBytes)
+        // A single snapshot is already contiguous; upload it without an extra host staging array.
+        if (collections.Count == 1)
         {
-            buffer = gpu.Allocate<T>(length);
+            valueBuffer!.Upload(gpu, collections[0].Snapshot);
+            return;
+        }
+        // Direct slice uploads avoid a second full host buffer for large batches.
+        // Pack small batches to share one transfer.
+        if ((long)length * ElementSize >= (long)collections.Count * MinimumDirectTransferBytes)
+        {
+            valueBuffer!.Allocate(gpu, length);
             foreach (var collection in collections)
-                buffer.CopyFrom(collection.Offset, collection.Snapshot);
+                valueBuffer!.CopyFrom(collection.Offset, collection.Snapshot);
             return;
         }
         var packed = new T[length];
         foreach (var collection in collections)
             collection.Snapshot.CopyTo(packed, collection.Offset);
-        if (mappedBuffer is not null)
-            mappedBuffer.Upload(gpu, packed);
-        else
-            buffer = gpu.Upload(packed);
+        valueBuffer!.Upload(gpu, packed);
     }
 
     /// <summary>Converts Boolean or UTF-16 character values into aligned device slots.</summary>
     /// <param name="source">The host elements to convert.</param>
     /// <param name="destination">The matching device slots.</param>
-    private static void Pack(ReadOnlySpan<T> source, Span<int> destination)
+    private static void Pack(T[] source, Span<int> destination)
     {
         if (typeof(T) == typeof(bool))
         {
-            var values = MemoryMarshal.Cast<T, bool>(source);
+            var values = (bool[])(object)source;
             for (int i = 0; i < values.Length; i++)
                 destination[i] = values[i] ? 1 : 0;
         }
         else
         {
-            var values = MemoryMarshal.Cast<T, char>(source);
+            var values = (char[])(object)source;
             for (int i = 0; i < values.Length; i++)
                 destination[i] = values[i];
         }
@@ -100,23 +98,20 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     {
         if (!UsesPaddedStorage)
         {
-            if (mappedBuffer is not null)
-                mappedBuffer.Download(offset, destination);
-            else
-                buffer!.CopyTo(offset, destination);
+            valueBuffer!.Download(offset, destination);
             return;
         }
         var padded = new int[destination.Length];
         paddedBuffer!.CopyTo(offset, padded);
         if (typeof(T) == typeof(bool))
         {
-            var values = MemoryMarshal.Cast<T, bool>(destination.AsSpan());
+            var values = (bool[])(object)destination;
             for (int i = 0; i < values.Length; i++)
                 values[i] = padded[i] != 0;
         }
         else
         {
-            var values = MemoryMarshal.Cast<T, char>(destination.AsSpan());
+            var values = (char[])(object)destination;
             for (int i = 0; i < values.Length; i++)
                 values[i] = unchecked((char)padded[i]);
         }
@@ -169,8 +164,7 @@ internal sealed class CollectionBatch<T> : CollectionBatch where T : unmanaged
     /// <inheritdoc/>
     public override void Dispose()
     {
-        buffer?.Dispose();
         paddedBuffer?.Dispose();
-        mappedBuffer?.Dispose();
+        valueBuffer?.Dispose();
     }
 }

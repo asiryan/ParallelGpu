@@ -76,7 +76,21 @@ public sealed partial class Gpu : IDisposable
     /// <returns>A buffer that the caller can dispose independently of the executor.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The length is negative.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
-    public GpuBuffer<T> Allocate<T>(int length) where T : unmanaged
+    public GpuBuffer<T> Allocate<T>(int length) where T : unmanaged => AllocateCore<T>(length, clear: true);
+
+    /// <summary>Allocates internal storage that will be filled completely before it can be read.</summary>
+    /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
+    /// <param name="length">The number of elements to allocate.</param>
+    /// <returns>An owned buffer with unspecified initial contents.</returns>
+    internal GpuBuffer<T> AllocateUninitialized<T>(int length) where T : unmanaged =>
+        AllocateCore<T>(length, clear: false);
+
+    /// <summary>Allocates owned storage with optional initialization.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="length">The number of elements to allocate.</param>
+    /// <param name="clear">Whether the public zero-initialization contract is required.</param>
+    /// <returns>The newly owned buffer.</returns>
+    private GpuBuffer<T> AllocateCore<T>(int length, bool clear) where T : unmanaged
     {
         if (length < 0)
             throw new ArgumentOutOfRangeException(nameof(length));
@@ -86,7 +100,7 @@ public sealed partial class Gpu : IDisposable
             var memory = accelerator.Allocate1D<T>(length);
             try
             {
-                if (length > 0)
+                if (clear && length > 0)
                     memory.MemSetToZero();
                 var buffer = new GpuBuffer<T>(this, memory, length);
                 buffers.Add(buffer);
@@ -112,7 +126,7 @@ public sealed partial class Gpu : IDisposable
             throw new ArgumentNullException(nameof(data));
         lock (SyncRoot)
         {
-            var buffer = Allocate<T>(data.Length);
+            var buffer = AllocateUninitialized<T>(data.Length);
             try
             {
                 buffer.CopyFrom(data);
@@ -131,7 +145,8 @@ public sealed partial class Gpu : IDisposable
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="kernel">The operation and its device-compatible state.</param>
-    /// <remarks>Empty and reversed ranges do nothing. Iterations are unordered and must be independent.</remarks>
+    /// <remarks>Empty and reversed ranges do nothing. Iterations are unordered;
+    /// shared writes require device synchronization or atomics.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
     /// <exception cref="ArgumentException">The kernel type is not publicly visible.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
@@ -234,6 +249,8 @@ public sealed partial class Gpu : IDisposable
             lambdaKernels.Clear();
             forKernels.Clear();
             forEachKernels.Clear();
+            reductionKernels.Clear();
+            collectKernels.Clear();
             accelerator.Dispose();
             context.Dispose();
             disposed = true;
@@ -251,7 +268,7 @@ public sealed partial class Gpu : IDisposable
     /// <param name="buffer">The buffer that has released its device allocation.</param>
     internal void Release(IDisposable buffer) => buffers.Remove(buffer);
 
-    /// <summary>Rejects types that cannot be used by generated ILGPU kernel launchers.</summary>
+    /// <summary>Rejects types that are not publicly visible to generated ILGPU kernel launchers.</summary>
     /// <param name="type">The kernel or element type to validate.</param>
     private static void ValidateVisible(Type type)
     {
@@ -296,7 +313,7 @@ public sealed partial class Gpu : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options.DeviceIndex), "Device index is unavailable.");
 
         var failures = new List<Exception>();
-        // Default automatic selection can try all GPUs; an explicit device index selects one candidate.
+        // Auto with index zero tries all GPUs; other selections try one device.
         var candidates = options.Backend == GpuBackend.Auto && options.DeviceIndex == 0
             ? devices
             : devices.Skip(options.DeviceIndex).Take(1);
@@ -315,4 +332,3 @@ public sealed partial class Gpu : IDisposable
             failures.Count > 0 ? new AggregateException(failures) : null);
     }
 }
-

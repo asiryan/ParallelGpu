@@ -5,8 +5,8 @@ using System.Reflection.Emit;
 namespace ParallelGpu;
 
 /// <summary>Recognizes and maps fixed-size device values without managed references.</summary>
-/// <remarks>Public blittable structures retain their native representation. Other supported structures
-/// use public mirrors with full-width character fields and aligned Boolean fields.</remarks>
+/// <remarks>Visible structures with default packing and unchanged field types retain their native representation.
+/// Other supported structures use public mirrors with UInt16 character fields and Int32 Boolean fields.</remarks>
 internal static class DeviceValueType
 {
     /// <summary>Cached structural checks shared by compilation and collection registration.</summary>
@@ -25,12 +25,12 @@ internal static class DeviceValueType
     /// <summary>Provides distinct generated converter type names.</summary>
     private static int converterCount;
     /// <summary>Boxed converters for structure values captured in loop closures.</summary>
-    private static readonly ConcurrentDictionary<Type, Func<object, object>> converters = new();
+    private static readonly ConcurrentDictionary<Type, Func<object?, object>> converters = new();
 
     /// <summary>Checks primitives, enums, and recursively composed structures without managed references.</summary>
     /// <param name="type">The candidate value type.</param>
     /// <returns>True when all instance fields use supported device values.</returns>
-    /// <remarks>Explicit layouts, nullable values, and native pointers are unsupported.
+    /// <remarks>Explicit layouts and native pointers are unsupported. Nullable values use a mapped presence flag and payload.
     /// Method compatibility is checked separately by the device compiler.</remarks>
     internal static bool IsSupported(Type type) => supported.GetOrAdd(type, candidate =>
     {
@@ -39,7 +39,7 @@ internal static class DeviceValueType
         if (candidate.IsPrimitive)
             return candidate != typeof(IntPtr) && candidate != typeof(UIntPtr);
         return candidate != typeof(void) && candidate.IsValueType && !candidate.IsByRefLike &&
-            !candidate.IsExplicitLayout && Nullable.GetUnderlyingType(candidate) is null && Fields(candidate).All(field => IsSupported(field.FieldType));
+            !candidate.IsExplicitLayout && Fields(candidate).All(field => IsSupported(field.FieldType));
     });
 
     /// <summary>Gets instance fields in their metadata order, including private and readonly fields.</summary>
@@ -49,7 +49,7 @@ internal static class DeviceValueType
         .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
         .OrderBy(field => field.MetadataToken).ToArray();
 
-    /// <summary>Maps character values, references, and structures needing an accessible blittable mirror.</summary>
+    /// <summary>Maps characters, by-reference value types, and structures needing an accessible device mirror.</summary>
     /// <param name="type">The original value or reference type.</param>
     /// <returns>The type used inside generated device code.</returns>
     internal static Type MapType(Type type)
@@ -94,11 +94,11 @@ internal static class DeviceValueType
             return mappings[field.DeclaringType!].Fields[field];
     }
 
-    /// <summary>Converts a captured structure into its device representation.</summary>
+    /// <summary>Converts a captured value into its device representation.</summary>
     /// <param name="value">The boxed host value.</param>
-    /// <param name="type">The original structure type.</param>
+    /// <param name="type">The original host value type.</param>
     /// <returns>A boxed value suitable for the generated capture field.</returns>
-    internal static object ToDevice(object value, Type type) => MapType(type) == type ? value :
+    internal static object ToDevice(object? value, Type type) => MapType(type) == type ? value! :
         converters.GetOrAdd(type, source =>
         {
             lock (sync)
@@ -110,17 +110,16 @@ internal static class DeviceValueType
                 EmitConversion(il, source, MapType(source));
                 il.Emit(OpCodes.Box, MapType(source));
                 il.Emit(OpCodes.Ret);
-                return (Func<object, object>)builder.CreateType()!.GetMethod(method.Name)!
-                    .CreateDelegate(typeof(Func<object, object>));
+                return (Func<object?, object>)builder.CreateType()!.GetMethod(method.Name)!
+                    .CreateDelegate(typeof(Func<object?, object>));
             }
         })(value);
 
-    /// <summary>Builds a typed host converter used to pack or unpack structure arrays.</summary>
+    /// <summary>Builds a typed host converter used to pack or unpack value arrays.</summary>
     /// <typeparam name="TSource">The original value representation.</typeparam>
     /// <typeparam name="TTarget">The requested value representation.</typeparam>
     /// <returns>A converter that copies and converts all instance fields.</returns>
     internal static Func<TSource, TTarget> Converter<TSource, TTarget>()
-        where TSource : unmanaged where TTarget : unmanaged
     {
         lock (sync)
         {

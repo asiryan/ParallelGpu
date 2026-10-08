@@ -38,9 +38,9 @@ public static class Matrices
         return matrix;
     }
 
-    /// <summary>Validates each matrix element with an absolute and relative tolerance.</summary>
-    /// <param name="expected">The CPU reference matrix.</param>
-    /// <param name="actual">The GPU result matrix.</param>
+    /// <summary>Checks each element against a tolerance of 1e-4 + 1e-4 * abs(reference element).</summary>
+    /// <param name="expected">The reference matrix.</param>
+    /// <param name="actual">The matrix to compare.</param>
     /// <returns>The maximum absolute element error.</returns>
     /// <exception cref="ArgumentNullException">Either matrix is null.</exception>
     /// <exception cref="ArgumentException">A matrix is empty or ragged, or the dimensions differ.</exception>

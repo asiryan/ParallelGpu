@@ -10,7 +10,7 @@ public sealed class LambdaLoopTests(GpuFixture fixture)
     [Fact]
     public void LargeTransfersPreserveAliasesUntouchedElementsAndFreshHostValues()
     {
-        // Each average leaf slice is over 1 MiB, including the empty jagged row.
+        // The three distinct leaves, including the empty row, average over 1 MiB.
         int[] input = Enumerable.Range(0, 500_001).ToArray();
         int[] output = Enumerable.Repeat(-1, 500_003).ToArray();
         int[] alias = output;
