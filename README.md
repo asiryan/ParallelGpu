@@ -87,7 +87,25 @@ gpu.For<int>(0, writable.Length, i =>
 // storage: 1, 12, 13, 4; observed: 12, 13
 ```
 
-Array-backed memory transfers its shared array. Memory-manager slices share a staged full-owner snapshot and commit; string-backed `ReadOnlyMemory<char>` uses a read-only UTF-16 snapshot. Aliasing between a custom memory manager and unrelated captures of its hidden storage requires that manager to expose its backing array through `TryGetArray`.
+Array-backed memory transfers its shared array. Memory-manager slices share a staged full-owner snapshot and commit; string-backed `ReadOnlyMemory<char>` uses a read-only UTF-16 snapshot. Aliasing between a custom memory manager and other captured views of its storage can use `TryGetArray`, or a registered indexed adapter exposing a shared full-owner snapshot. A staged adapter must use the memory manager as its shared identity and expose the same full buffer length; related slices then reuse that snapshot and commit.
+
+## Framework math
+
+Ordinary loops accept the following static `Math` and `MathF` signatures. Each parameter and the return value use the stated type; other overloads are unsupported. This portable subset uses core ILGPU 1.5.3 intrinsics and explicit guarded lowering.
+
+| Methods | Signature and element types |
+| --- | --- |
+| `Math.Abs` | `T(T)`, where `T` is `sbyte`, `short`, `int`, `long`, `float`, or `double` |
+| `Math.Min`, `Math.Max` | `T(T, T)`, where `T` is `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, or `double` |
+| `Math.Sqrt`, `Math.Floor`, `Math.Ceiling` | `double(double)` |
+| `Math.CopySign` | `double(double, double)` |
+| `MathF.Abs`, `MathF.Sqrt`, `MathF.Floor`, `MathF.Ceiling` | `float(float)` |
+| `MathF.CopySign`, `MathF.Min`, `MathF.Max` | `float(float, float)` |
+| `Math.Clamp` | `T(T, T, T)`, for the ten numeric types listed for `Math.Min`/`Math.Max` |
+
+Signed integer `Math.Abs` uses a guard for the minimum representable value. Floating-point `Min`/`Max` preserve .NET NaN propagation and signed-zero behavior. `Math.Clamp` preserves ordered comparisons, including NaN values, and defers inverted bounds to `ArgumentException` on the host. These guarded methods also work through supported helpers. Other listed calls use ILGPU intrinsics, whose floating-point rounding may differ from CPU execution.
+
+Framework math calls outside this table, including `Sin`, `Cos`, `Pow`, `Log`, `Round`, `Sign`, `Truncate`, `Log2`, `DivRem`, and decimal overloads, are rejected before device compilation, including transitive helper calls. The library enables neither `ILGPU.Algorithms` nor CUDA LibDevice. A broader backend math contract requires optional Algorithms or LibDevice configuration; a remapping registration alone does not establish that its backend implementation is available.
 
 ## Custom indexed collections
 
@@ -204,13 +222,15 @@ Invalid/null/foreign graph access and capacity exhaustion set graph error flags.
 
 Ordinary lambda compilation rejects unsupported operations rather than running the body on the CPU. Scalar captures are reread each invocation; collection snapshots are invocation-local. Aliases share device storage. Only written leaves, or leaves exposed by writable reference, are downloaded. Calls on one executor are serialized; do not mutate transferred host collections concurrently.
 
-Ordinary loops defer nullable `Value` on null, null collection dereferences, invalid indices, invalid slices, and writes through read-only snapshots to host exceptions. These errors are checked before automatically transferred collections are copied back or snapshot commits run. This protects those host collections from partial kernel results. It does not roll back separately owned device buffers, append buffers, object graphs, or adapter callback side effects. Explicit value kernels use ILGPU's own execution contracts rather than the automatic lambda error transport.
+Ordinary loops defer nullable `Value` on null, null collection dereferences, invalid indices, invalid slices, and writes through read-only snapshots to host exceptions. Invalid array/span indices produce `IndexOutOfRangeException`; invalid list or segment indexer access and invalid slices produce `ArgumentOutOfRangeException`. Registered adapter bounds follow the snapshot storage contract; the original custom indexer and its exception behavior are not executed. Integer division and remainder by zero produce `DivideByZeroException`. Signed division or remainder of the minimum value by `-1` and signed integer `Math.Abs` of the minimum value produce `OverflowException`. An inverted `Math.Clamp` interval produces `ArgumentException`.
+
+These errors are checked before automatically transferred collections are copied back or snapshot commits run. This protects those host collections from partial kernel results. It does not roll back separately owned device buffers, append buffers, object graphs, or adapter callback side effects. Explicit value kernels use ILGPU's own execution contracts rather than the automatic lambda error transport.
 
 `GpuBuffer<T>`, `GpuAppendBuffer<T>`, and `GpuObjectGraph<TObject,TRecord>` are disposable and owned by their executor; disposing the executor releases outstanding allocations. Borrowed device views must remain within their owner's lifetime and must be used with that executor. Ordinary lambda captures of native append/graph views validate owner and lifetime before launch. Their payload must be a public supported value type whose layout needs no automatic conversion; use `ushort` for characters and `int` for Boolean record fields. Mapped payloads are rejected before device compilation. With explicit `IGpuForKernel`/`IGpuCollectKernel` state, the caller must preserve view ownership and lifetime.
 
 The automatic lambda path maps private structures, characters, booleans, and nullable values into device representations. Direct `Upload<T>`, `Allocate<T>`, reductions, append buffers, graph records, and explicit value kernels use public unmanaged ILGPU-compatible representations; they do not perform those automatic host-value conversions.
 
-Intentional CLR limitations include arbitrary class instances or reference-bearing structures as direct loop values, strings as direct values, boxing, runtime reflection, managed allocation, `new` class objects, exception handlers/throwing bodies, delegates, dynamic/virtual managed dispatch, recursion, native pointers, and changing array/list topology inside automatic loops. Use snapshots, graph records, bounded append buffers, and reductions for their explicit GPU equivalents. Unsupported helper IL is rejected during translation.
+Intentional CLR limitations include arbitrary class instances or reference-bearing structures as direct loop values, strings as direct values, boxing, runtime reflection, managed allocation, `new` class objects, exception handlers/throwing bodies, checked integer arithmetic/conversions, delegates, dynamic/virtual managed dispatch, native pointers, and changing array/list topology inside automatic loops. Use snapshots, graph records, bounded append buffers, and reductions for their explicit GPU equivalents. Unsupported helper IL and checked integer arithmetic/conversions are rejected before device compilation. Use unchecked arithmetic or explicit device-side range checks for those operations. Helper calls remain subject to ILGPU and backend restrictions, including recursive calls and device stack usage.
 
 ## Build, samples, and verification
 
@@ -224,3 +244,19 @@ dotnet run --project samples/ComplexVectorMultiplication
 ```
 
 Tests default to the ILGPU CPU backend for correctness checks. Set `PARALLEL_GPU_TEST_BACKEND` to `Cuda`, `OpenCL`, or `Auto` to require the selected GPU path. Tests cover array rank and nesting, lower bounds, aliases, nullable values, structures, helper translation, memory adapters, deferred errors, reductions, atomics, bounded output, object graphs, and disposal.
+
+## Local performance measurements
+
+The final audit on 2026-10-08 used an Intel Core i7-13700KF, RTX 4070 Ti, NVIDIA driver 591.44, and .NET 8.0.31. All 182 tests passed in Debug and Release on both CPU and CUDA; both configurations built with warnings treated as errors. OpenCL was not exercised on this machine.
+
+For 1,000,000 elements, the two independent optimized runs produced the following medians in milliseconds. Ranges describe those two medians, not confidence intervals. The compute map performs 32 dependent floating-point steps per element.
+
+| Operation | Native .NET CPU reference | CUDA automatic loop / input upload | CUDA with input already resident |
+| --- | --- | --- | --- |
+| Simple affine map | 0.402, sequential | 1.485–1.624 | 0.021–0.023 |
+| Compute map | 6.165–6.377, `Parallel.For` | 1.533–1.534 | 0.059–0.060 |
+| Integer sum | 1.361–1.391, sequential | 0.678–0.739 | 0.229–0.237 |
+
+The automatic path therefore remains slower than a sequential CPU loop for this cheap map, while the compute map is about four times faster than the measured `Parallel.For` reference including transfers. Reusing device buffers removes most of the map's transfer and setup cost. These are workload-specific measurements on a shared desktop GPU, not a general optimum or a performance guarantee.
+
+The audit removes redundant zeroing before complete uploads and reduction writes, singleton host staging, and separate shape tables for zero-based flat arrays. Public `Allocate<T>` still returns zero-filled storage. Automatic memory slices continue to transfer their full backing owner to preserve overlapping aliases; keeping buffers resident is the main remaining way to avoid repeated full-owner transfers.

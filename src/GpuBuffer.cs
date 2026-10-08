@@ -50,9 +50,13 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
     /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public T[] ToArray()
     {
-        var result = new T[Length];
-        CopyTo(result);
-        return result;
+        lock (owner.SyncRoot)
+        {
+            ThrowIfDisposed();
+            var result = new T[Length];
+            CopyTo(result);
+            return result;
+        }
     }
 
     /// <summary>Replaces the buffer contents with data from a host array.</summary>

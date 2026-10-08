@@ -9,6 +9,8 @@ internal static class DeviceInstructionValidation
     internal static void Validate(LoopInstruction instruction)
     {
         var code = instruction.Code;
+        if (code.Name!.Contains(".ovf", StringComparison.Ordinal))
+            throw new NotSupportedException($"Checked instruction '{code.Name}' is not supported in automatic GPU loops. Use unchecked arithmetic or explicit device-side range validation.");
         if (code == OpCodes.Newarr || code == OpCodes.Box || code == OpCodes.Unbox ||
             code == OpCodes.Unbox_Any || code == OpCodes.Castclass || code == OpCodes.Isinst ||
             code == OpCodes.Throw || code == OpCodes.Rethrow || code == OpCodes.Stsfld ||
@@ -24,7 +26,8 @@ internal static class DeviceInstructionValidation
         if (method is MethodInfo info && (!ScalarMethodTranslator.IsCompatible(info.ReturnType) ||
             info.GetParameters().Any(parameter => !ScalarMethodTranslator.IsCompatible(parameter.ParameterType))))
             throw new NotSupportedException($"Helper '{method}' uses managed parameters or a managed return value.");
-        // Framework numeric methods and intrinsics are checked or lowered by their own device implementations.
+        DeviceNumericMethods.Validate(method);
+        // Supported framework operations are lowered by the collection/value translator or ILGPU.
         if (method.Module.Assembly == typeof(object).Assembly)
             return;
         if (method.GetMethodBody() is null)

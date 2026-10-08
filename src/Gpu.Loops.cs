@@ -15,20 +15,24 @@ public sealed partial class Gpu
     /// lists, memory slices, and registered adapters. Elements may be supported primitives, enums, nullable values,
     /// or structures without managed references. Aliases and array lower bounds are preserved.
     /// Captures are read on every invocation. Writable host collections are copied back only after a successful loop;
-    /// null, bounds, nullable-value, slice, and readonly failures are reported before any host copyback.
+    /// null, bounds, nullable-value, slice, readonly, integer division or remainder, signed absolute value overflow,
+    /// and inverted clamp bounds are reported before any automatic host collection copyback.
     /// Constructors and compatible helper methods accept values and collection parameters. Captured descriptors
     /// and scalar values are read-only. Explicit layouts and native pointer fields are unsupported.
     /// Iterations are unordered: shared mutations require synchronization such as GpuAtomic or explicit reduction.
     /// Captured append and graph views must be live and owned by this executor; their own deferred errors are checked
     /// by their host result APIs, and their device writes are not rolled back on a loop failure.
     /// Empty and reversed ranges do not compile or execute the body.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
-    /// <exception cref="NotSupportedException">The body or a captured collection is not supported by the device compiler.</exception>
+    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor uses a null array.</exception>
+    /// <exception cref="ArgumentException">A captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// <exception cref="NotSupportedException">The body uses unsupported operations, including checked integer arithmetic or conversions, or a captured collection is unsupported.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
-    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid collection index.</exception>
-    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable or wrote a read-only view.</exception>
+    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
+    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
+    /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
+    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
     public void For(int fromInclusive, int toExclusive, Action<int> body) =>
         ForBody(fromInclusive, toExclusive, body, null);
 
@@ -39,14 +43,16 @@ public sealed partial class Gpu
     /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>Use the non-generic overload for mixed collection element types.
     /// Compilation and transfers are automatic, and results are available on return.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null.</exception>
-    /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
-    /// <exception cref="NotSupportedException">The element type, body, or a captured collection is unsupported.</exception>
+    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor uses a null array.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type, a captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// <exception cref="NotSupportedException">The element type, body, or captured collection is unsupported, including checked integer arithmetic or conversions.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
-    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid collection index.</exception>
-    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable or wrote a read-only view.</exception>
+    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
+    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
+    /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
+    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
     public void For<T>(int fromInclusive, int toExclusive, Action<int> body)
     {
         LambdaKernel.ValidateElementType(typeof(T));

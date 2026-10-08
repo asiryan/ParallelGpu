@@ -62,10 +62,6 @@ internal sealed class LambdaKernel
     /// <exception cref="NotSupportedException">A captured runtime collection is unsupported.</exception>
     internal void Execute(Gpu gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
-        var state = Activator.CreateInstance(stateType)!;
-        using var errors = gpu.Allocate<int>(1);
-        using var transfers = new CollectionTransfers(gpu);
-
         // Validate every capture before allocating memory or launching the kernel.
         var values = captures.Select(capture => capture.Read(body.Target)).ToArray();
         for (int i = 0; i < captures.Length; i++)
@@ -86,6 +82,9 @@ internal sealed class LambdaKernel
                 throw new NotSupportedException(
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
         }
+        var state = Activator.CreateInstance(stateType)!;
+        using var errors = gpu.Allocate<int>(1);
+        using var transfers = new CollectionTransfers(gpu);
         for (int i = 0; i < captures.Length; i++)
             if (captures[i].Element is Type element)
                 values[i] = transfers.Add(values[i]!, element);
@@ -254,6 +253,9 @@ internal sealed class LambdaKernel
             if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
                 LoopStackTypes.TryEmitReferenceOperation(il, instruction, stack, labels, emitContext))
                 continue;
+            if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
+                ScalarMethodTranslator.TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
+                continue;
             if (TryArrayOperation(il, instruction))
                 continue;
             if (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt)
@@ -280,16 +282,8 @@ internal sealed class LambdaKernel
             }
             if (instruction.Code == OpCodes.Readonly)
                 continue; // The replacement for ldelema is an ordinary ref-returning method.
-            if (instruction.Code == OpCodes.Newarr ||
-                instruction.Code == OpCodes.Box || instruction.Code == OpCodes.Unbox ||
-                instruction.Code == OpCodes.Unbox_Any || instruction.Code == OpCodes.Castclass ||
-                instruction.Code == OpCodes.Isinst || instruction.Code == OpCodes.Throw ||
-                instruction.Code == OpCodes.Rethrow ||
-                instruction.Code == OpCodes.Stsfld || instruction.Code == OpCodes.Ldsflda ||
-                instruction.Code == OpCodes.Ldnull || instruction.Code == OpCodes.Ldftn ||
-                instruction.Code == OpCodes.Ldvirtftn || instruction.Code == OpCodes.Ldtoken ||
-                instruction.Code == OpCodes.Calli || instruction.Code == OpCodes.Constrained)
-                throw Unsupported($"Instruction '{instruction.Code.Name}'");
+            DeviceInstructionValidation.Validate(instruction);
+
             LoopIL.Emit(il, instruction.Operand is Type operandType
                 ? instruction with { Operand = ScalarMethodTranslator.MapType(operandType) } : instruction, labels);
         }

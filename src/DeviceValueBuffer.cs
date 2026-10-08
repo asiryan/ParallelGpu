@@ -11,7 +11,7 @@ internal abstract class DeviceValueBuffer<T> : IDisposable
     internal abstract ArrayView<byte> View { get; }
     /// <summary>Gets the physical device element size.</summary>
     internal abstract int ElementSize { get; }
-    /// <summary>Allocates storage before direct slice uploads.</summary>
+    /// <summary>Allocates uninitialized storage that direct slice uploads must completely fill before launch.</summary>
     /// <param name="gpu">The executor owning the allocation.</param>
     /// <param name="length">The device element count.</param>
     internal abstract void Allocate(Gpu gpu, int length);
@@ -65,7 +65,7 @@ internal sealed class DeviceValueBuffer<THost, TDevice> : DeviceValueBuffer<THos
     /// <inheritdoc/>
     internal override int ElementSize => Interop.SizeOf<TDevice>();
     /// <inheritdoc/>
-    internal override void Allocate(Gpu gpu, int length) => buffer = gpu.Allocate<TDevice>(length);
+    internal override void Allocate(Gpu gpu, int length) => buffer = gpu.AllocateUninitialized<TDevice>(length);
     /// <inheritdoc/>
     internal override void Upload(Gpu gpu, THost[] values) => buffer = gpu.Upload(Pack(values));
     /// <inheritdoc/>

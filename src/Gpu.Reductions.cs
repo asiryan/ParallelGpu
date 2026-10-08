@@ -82,8 +82,8 @@ public sealed partial class Gpu
             var launch = (Action<KernelConfig, ArrayView<T>, ArrayView<T>, int, TOperation>)compiled;
             int chunkSize = groupSize * 2;
             int firstLength = (buffer.Length - 1) / chunkSize + 1;
-            using var first = Allocate<T>(firstLength);
-            using var second = Allocate<T>((firstLength - 1) / chunkSize + 1);
+            using var first = AllocateUninitialized<T>(firstLength);
+            using var second = AllocateUninitialized<T>((firstLength - 1) / chunkSize + 1);
             var input = buffer.View;
             int length = buffer.Length;
             bool useFirst = true;

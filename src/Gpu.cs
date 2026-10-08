@@ -76,7 +76,21 @@ public sealed partial class Gpu : IDisposable
     /// <returns>A buffer that the caller can dispose independently of the executor.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The length is negative.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
-    public GpuBuffer<T> Allocate<T>(int length) where T : unmanaged
+    public GpuBuffer<T> Allocate<T>(int length) where T : unmanaged => AllocateCore<T>(length, clear: true);
+
+    /// <summary>Allocates internal storage that will be filled completely before it can be read.</summary>
+    /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
+    /// <param name="length">The number of elements to allocate.</param>
+    /// <returns>An owned buffer with unspecified initial contents.</returns>
+    internal GpuBuffer<T> AllocateUninitialized<T>(int length) where T : unmanaged =>
+        AllocateCore<T>(length, clear: false);
+
+    /// <summary>Allocates owned storage with optional initialization.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="length">The number of elements to allocate.</param>
+    /// <param name="clear">Whether the public zero-initialization contract is required.</param>
+    /// <returns>The newly owned buffer.</returns>
+    private GpuBuffer<T> AllocateCore<T>(int length, bool clear) where T : unmanaged
     {
         if (length < 0)
             throw new ArgumentOutOfRangeException(nameof(length));
@@ -86,7 +100,7 @@ public sealed partial class Gpu : IDisposable
             var memory = accelerator.Allocate1D<T>(length);
             try
             {
-                if (length > 0)
+                if (clear && length > 0)
                     memory.MemSetToZero();
                 var buffer = new GpuBuffer<T>(this, memory, length);
                 buffers.Add(buffer);
@@ -112,7 +126,7 @@ public sealed partial class Gpu : IDisposable
             throw new ArgumentNullException(nameof(data));
         lock (SyncRoot)
         {
-            var buffer = Allocate<T>(data.Length);
+            var buffer = AllocateUninitialized<T>(data.Length);
             try
             {
                 buffer.CopyFrom(data);

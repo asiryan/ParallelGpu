@@ -18,11 +18,12 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
         new(ReferenceIdentityComparer.Instance);
     /// <summary>Shared staged snapshots keyed by their host storage identities.</summary>
     private readonly Dictionary<object, object> adapterSnapshots = new(ReferenceIdentityComparer.Instance);
-    /// <summary>Host commits attached to backing leaf write flags.</summary>
-    private readonly Dictionary<int, Action> adapterCommits = new();
+    /// <summary>One host commit per storage identity, retaining its shared backing leaf write flag.</summary>
+    private readonly Dictionary<object, (int DirtyIndex, Action Commit)> adapterCommits =
+        new(ReferenceIdentityComparer.Instance);
     /// <summary>Packed device buffers grouped by element type for the current invocation.</summary>
     private readonly Dictionary<Type, CollectionBatch> batches = new();
-    /// <summary>Row descriptors stored as consecutive offset, length, and write-flag index triples.</summary>
+    /// <summary>Row descriptors packed with offsets, lengths, write flags, shape offsets, ranks, and identities.</summary>
     private readonly List<int> rows = new();
     /// <summary>Dimension triples shared by every registered array and list.</summary>
     private readonly List<int> shapes = new();
@@ -50,7 +51,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
 
     /// <summary>Registers a host collection using its runtime supported element type.</summary>
     /// <param name="source">The host collection to register.</param>
-    /// <param name="elementType">The supported supported element type.</param>
+    /// <param name="elementType">The supported element type.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
     internal CapturedCollection Add(object? source, Type elementType) =>
         source is null ? new CapturedNullCollection(this) : factories.GetOrAdd(elementType, CreateFactory)(this, source);
@@ -86,9 +87,11 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             GpuCollectionAdapters.TryCapture<T>(source, adapterSnapshots, out var snapshot))
         {
             var backing = (CapturedCollection<T>)Add<T>(snapshot.Buffer);
-            collection = new CapturedSliceCollection<T>(this, backing, snapshot);
-            if (snapshot.Commit is not null && !adapterCommits.ContainsKey(backing.DirtyIndex))
-                adapterCommits.Add(backing.DirtyIndex, () => snapshot.Commit(snapshot.Buffer));
+            collection = new CapturedSliceCollection<T>(this, backing, snapshot,
+                arraySegment: source is ArraySegment<T>,
+                nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null);
+            if (snapshot.Commit is not null && !adapterCommits.ContainsKey(snapshot.Identity))
+                adapterCommits.Add(snapshot.Identity, (backing.DirtyIndex, () => snapshot.Commit(snapshot.Buffer)));
         }
         else
             collection = source is Array nested && nested.GetType().GetElementType()!.IsArray
@@ -137,9 +140,11 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
 
     /// <summary>Appends the row-major shape of an array, retaining its native lower bounds.</summary>
     /// <param name="array">The host array.</param>
-    /// <returns>The first dimension's integer offset.</returns>
+    /// <returns>The first dimension's integer offset, or minus one for an inline zero-based flat shape.</returns>
     internal int AddShape(Array array)
     {
+        if (array.Rank == 1 && array.GetLowerBound(0) == 0)
+            return -1;
         int offset = shapes.Count;
         var metadata = new int[checked(array.Rank * 3)];
         int stride = 1;
@@ -158,17 +163,10 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
         return offset;
     }
 
-    /// <summary>Appends a zero-based one-dimensional shape.</summary>
+    /// <summary>Uses the descriptor's inline length for a zero-based one-dimensional shape.</summary>
     /// <param name="length">The collection length.</param>
-    /// <returns>The dimension's integer offset.</returns>
-    internal int AddFlatShape(int length)
-    {
-        int offset = shapes.Count;
-        shapes.Add(length);
-        shapes.Add(0);
-        shapes.Add(1);
-        return offset;
-    }
+    /// <returns>Minus one, selecting the descriptor's inline shape.</returns>
+    internal int AddFlatShape(int length) => -1;
 
     /// <summary>Allocates write flags and uploads all registered row metadata and element data.</summary>
     /// <remarks>Complete collection registration before calling this method.</remarks>
@@ -191,9 +189,9 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
         int[] written = writeBuffer!.ToArray();
         foreach (var batch in batches.Values)
             batch.CopyBack(written);
-        foreach (var commit in adapterCommits)
-            if (written[commit.Key] != 0)
-                commit.Value();
+        foreach (var commit in adapterCommits.Values)
+            if (written[commit.DirtyIndex] != 0)
+                commit.Commit();
     }
 
     /// <summary>Releases all packed data and metadata buffers owned by this invocation.</summary>

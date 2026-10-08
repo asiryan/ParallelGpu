@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -7,6 +8,7 @@ namespace ParallelGpu;
 internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
 {
     private readonly Dictionary<MethodBase, MethodInfo> methods = new();
+    private static readonly ConcurrentDictionary<ConstructorInfo, bool> nullSegmentConstructors = new();
 
     internal bool TryEmit(ILGenerator il, MethodInfo method)
     {
@@ -49,11 +51,26 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
             methods.Add(constructor, replacement);
             var body = ((MethodBuilder)replacement).GetILGenerator();
             body.Emit(OpCodes.Ldarg_0);
-            EmitSlice(body, parameters.Length - 1, 1);
-            if (IsReadOnly(type))
-                body.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.ReadOnly)));
+            if (IsSegment(type))
+            {
+                if (parameters.Length == 1)
+                    body.Emit(OpCodes.Call, SliceMethod(nullSegmentConstructors.GetOrAdd(constructor, AllowsNullSegment)
+                        ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.SegmentConstructorWhole)));
+                else if (parameters.Length == 3)
+                {
+                    body.Emit(OpCodes.Ldarg_1);
+                    body.Emit(OpCodes.Ldarg_2);
+                    body.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.SegmentConstructor)));
+                }
+                else
+                    throw new NotSupportedException($"Array segment constructor '{constructor}' is unsupported inside GPU loops.");
+            }
             else
-                body.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.Normalize)));
+            {
+                EmitSlice(body, parameters.Length - 1, 1);
+                body.Emit(OpCodes.Call, SliceMethod(IsReadOnly(type)
+                    ? nameof(DeviceCollectionSlice.ReadOnly) : nameof(DeviceCollectionSlice.Normalize)));
+            }
             body.Emit(OpCodes.Ret);
         }
         if (code == OpCodes.Newobj)
@@ -90,7 +107,8 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         {
             EmitSlice(il, parameters.Count - 1, 1);
             il.Emit(OpCodes.Call, SliceMethod(IsReadOnly(method.ReturnType)
-                ? nameof(DeviceCollectionSlice.ReadOnly) : nameof(DeviceCollectionSlice.Normalize)));
+                ? nameof(DeviceCollectionSlice.ReadOnly) : IsSegment(method.ReturnType)
+                    ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.Normalize)));
         }
         else if (method.Name is "get_Count" or "get_Length")
             il.Emit(OpCodes.Call, valueReceiver ? SliceMethod(nameof(DeviceCollectionSlice.Count))
@@ -102,7 +120,8 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
             if (method.GetParameters().Length != 1 || method.GetParameters()[0].ParameterType != typeof(int))
                 throw new NotSupportedException("GPU collection adapters require an integer indexer.");
             if (valueReceiver)
-                il.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.Normalize)));
+                il.Emit(OpCodes.Call, SliceMethod(IsSegment(declaring)
+                    ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.Normalize)));
             il.Emit(OpCodes.Ldarg_1);
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(method.ReturnType.IsByRef
                 ? IsReadOnly(declaring) ? nameof(DeviceCollection.ReadOnlyAddress) : nameof(DeviceCollection.Address)
@@ -113,7 +132,8 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
             if (method.GetParameters().Length != 2 || method.GetParameters()[0].ParameterType != typeof(int))
                 throw new NotSupportedException("GPU collection adapters require an integer indexer.");
             if (valueReceiver)
-                il.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.Normalize)));
+                il.Emit(OpCodes.Call, SliceMethod(IsSegment(declaring)
+                    ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.Normalize)));
             il.Emit(OpCodes.Ldarg_1);
             il.Emit(OpCodes.Ldarg_2);
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.Write))!
@@ -123,11 +143,12 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         {
             int argumentCount = parameters.Count - 1;
             if (method.Name == "Slice")
-                EmitSlice(il, argumentCount, 1);
+                EmitSlice(il, argumentCount, 1, IsSegment(declaring));
             else if (argumentCount != 0)
                 throw new NotSupportedException($"Memory operation '{method}' is unsupported inside GPU loops.");
             il.Emit(OpCodes.Call, SliceMethod(IsReadOnly(method.ReturnType)
-                ? nameof(DeviceCollectionSlice.ReadOnly) : nameof(DeviceCollectionSlice.Normalize)));
+                ? nameof(DeviceCollectionSlice.ReadOnly) : IsSegment(method.ReturnType)
+                    ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.Normalize)));
         }
         else
             throw new NotSupportedException($"Collection adapter operation '{declaring.FullName}.{method.Name}' is unsupported inside GPU loops. Use its integer indexer, length, or contiguous slice.");
@@ -135,7 +156,7 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         return builder;
     }
 
-    private static void EmitSlice(ILGenerator il, int arguments, int startArgument)
+    private static void EmitSlice(ILGenerator il, int arguments, int startArgument, bool segment = false)
     {
         if (arguments == 0)
             return;
@@ -144,8 +165,23 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         il.Emit(OpCodes.Ldarg, (short)startArgument);
         if (arguments == 2)
             il.Emit(OpCodes.Ldarg, (short)(startArgument + 1));
-        il.Emit(OpCodes.Call, SliceMethod(arguments == 1
-            ? nameof(DeviceCollectionSlice.SliceFrom) : nameof(DeviceCollectionSlice.Slice)));
+        il.Emit(OpCodes.Call, SliceMethod(segment
+            ? arguments == 1 ? nameof(DeviceCollectionSlice.SegmentSliceFrom) : nameof(DeviceCollectionSlice.SegmentSlice)
+            : arguments == 1 ? nameof(DeviceCollectionSlice.SliceFrom) : nameof(DeviceCollectionSlice.Slice)));
+    }
+
+    /// <summary>Matches the current CLR's null-array constructor semantics during host compilation.</summary>
+    private static bool AllowsNullSegment(ConstructorInfo constructor)
+    {
+        try
+        {
+            constructor.Invoke(new object?[] { null });
+            return true;
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is ArgumentNullException)
+        {
+            return false;
+        }
     }
 
     private static MethodInfo SliceMethod(string name) => typeof(DeviceCollectionSlice).GetMethod(name)!;
@@ -154,6 +190,9 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         (type.GetGenericTypeDefinition() == typeof(ArraySegment<>) || type.GetGenericTypeDefinition() == typeof(Memory<>) ||
          type.GetGenericTypeDefinition() == typeof(ReadOnlyMemory<>) || type.GetGenericTypeDefinition() == typeof(Span<>) ||
          type.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>));
+
+    private static bool IsSegment(Type type) =>
+        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ArraySegment<>);
 
     private static bool IsReadOnly(Type type) => type.IsGenericType &&
         (type.GetGenericTypeDefinition() == typeof(ReadOnlyMemory<>) || type.GetGenericTypeDefinition() == typeof(ReadOnlySpan<>));

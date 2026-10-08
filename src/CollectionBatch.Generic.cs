@@ -51,6 +51,12 @@ internal sealed class CollectionBatch<T> : CollectionBatch
             paddedBuffer = gpu.Upload(padded);
             return;
         }
+        // A single snapshot is already contiguous; upload it without an extra host staging array.
+        if (collections.Count == 1)
+        {
+            valueBuffer!.Upload(gpu, collections[0].Snapshot);
+            return;
+        }
         // Large collections can be copied directly into their slices, avoiding a second
         // gigabyte-sized host allocation. Keep small collections packed to batch transfers.
         if ((long)length * ElementSize >= (long)collections.Count * MinimumDirectTransferBytes)

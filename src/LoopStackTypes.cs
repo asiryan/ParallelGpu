@@ -3,7 +3,7 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Tracks original IL stack types to preserve collection reference comparisons after lowering.</summary>
+/// <summary>Tracks IL stack types for collection reference comparisons and guarded integer arithmetic.</summary>
 internal static class LoopStackTypes
 {
     internal static Dictionary<int, Type?[]> Analyze(MethodBase method, List<LoopInstruction> instructions)
@@ -48,7 +48,7 @@ internal static class LoopStackTypes
             for (int i = 0; i < previous.Length; i++)
             {
                 var merged = previous[i] == stack[i] ? previous[i] :
-                    previous[i] == typeof(void) ? stack[i] : stack[i] == typeof(void) ? previous[i] : typeof(object);
+                    previous[i] == typeof(void) ? stack[i] : stack[i] == typeof(void) ? previous[i] : MergeNumeric(previous[i], stack[i]);
                 if (previous[i] != merged)
                 {
                     previous[i] = merged;
@@ -60,6 +60,12 @@ internal static class LoopStackTypes
         }
     }
 
+    private static Type MergeNumeric(Type? left, Type? right)
+    {
+        int width = DeviceArithmetic.IntegerWidth(left);
+        return width > 0 && width == DeviceArithmetic.IntegerWidth(right)
+            ? width == 32 ? typeof(int) : typeof(long) : typeof(object);
+    }
     internal static bool TryEmitReferenceOperation(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Dictionary<int, Label> labels, Action<ILGenerator> emitContext)
     {
@@ -160,6 +166,7 @@ internal static class LoopStackTypes
             type = (Type)instruction.Operand!;
         else if (code.Name.StartsWith("ldc.i4", StringComparison.Ordinal) ||
             code.Name.StartsWith("conv.i4", StringComparison.Ordinal) || code.Name.StartsWith("conv.u4", StringComparison.Ordinal) ||
+            code == OpCodes.Conv_I1 || code == OpCodes.Conv_U1 || code == OpCodes.Conv_I2 || code == OpCodes.Conv_U2 ||
             code == OpCodes.Ceq || code == OpCodes.Cgt || code == OpCodes.Cgt_Un || code == OpCodes.Clt || code == OpCodes.Clt_Un)
             type = typeof(int);
         else if (code == OpCodes.Ldc_I8 || code == OpCodes.Conv_I8 || code == OpCodes.Conv_U8)

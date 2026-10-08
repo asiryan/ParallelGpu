@@ -32,7 +32,7 @@ internal readonly struct DeviceExecutionContext
         ref Scratch.SubView((long)ThreadIndex * ScratchStride, ScratchStride).Cast<T>()[0];
 
     /// <summary>Records the first failure without throwing inside a device kernel.</summary>
-    /// <param name="code">One for an empty nullable, two for a null collection, three for an invalid index.</param>
+    /// <param name="code">The host exception category reported by the validated collection or numeric operation.</param>
     public void Fail(int code)
     {
         if (Errors.Length > 0)
@@ -51,6 +51,12 @@ internal readonly struct DeviceExecutionContext
             case 3: throw new IndexOutOfRangeException("A GPU loop index was outside the collection bounds.");
             case 5: throw new InvalidOperationException("A GPU loop attempted to write a read-only collection.");
             case 6: throw new ArgumentOutOfRangeException("slice", "A GPU collection slice was outside the collection bounds.");
+            case 7: throw new ArgumentNullException("array", "An ArraySegment constructor requires a non-null array.");
+            case 8: throw new InvalidOperationException("A default ArraySegment has no backing array.");
+            case 9: throw new ArgumentOutOfRangeException("index", "An indexed GPU collection access was outside its bounds.");
+            case 10: throw new ArgumentException("Clamp minimum must not exceed maximum.");
+            case 11: throw new DivideByZeroException("An integer GPU operation divided by zero.");
+            case 12: throw new OverflowException("An integer GPU operation overflowed.");
             default: throw new InvalidOperationException("A GPU loop reported an invalid device operation.");
         }
     }

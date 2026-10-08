@@ -31,6 +31,8 @@ internal readonly struct DeviceCollection
     public readonly DeviceExecutionContext Context;
     /// <summary>One for a read-only collection view; zero for a writable view.</summary>
     public readonly int IsReadOnly;
+    /// <summary>The deferred exception code for an invalid flat index.</summary>
+    public readonly int IndexErrorCode;
     /// <summary>The physical element stride in bytes.</summary>
     public readonly int ElementSize;
     /// <summary>The invocation's shared write flags.</summary>
@@ -54,11 +56,13 @@ internal readonly struct DeviceCollection
     /// <param name="identity">The host reference identity.</param>
     /// <param name="context">The invocation's deferred error context.</param>
     /// <param name="readOnly">One for a read-only view, otherwise zero.</param>
+    /// <param name="indexErrorCode">Three for array bounds, or nine for collection indexers.</param>
     public DeviceCollection(ArrayView<byte> bytes, int length, int rows = -1, int columns = 0,
         ArrayView<int> rowMetadata = default, int elementSize = 0,
         ArrayView<int> writes = default, int dirtyIndex = -1,
         ArrayView<int> shapeMetadata = default, int shapeOffset = -1,
-        int rank = 1, int rowOffset = 0, int identity = 0, DeviceExecutionContext context = default, int readOnly = 0)
+        int rank = 1, int rowOffset = 0, int identity = 0, DeviceExecutionContext context = default, int readOnly = 0,
+        int indexErrorCode = 3)
     {
         Bytes = bytes;
         Length = length;
@@ -72,6 +76,7 @@ internal readonly struct DeviceCollection
         Identity = identity;
         Context = context;
         IsReadOnly = readOnly;
+        IndexErrorCode = indexErrorCode;
         ElementSize = elementSize;
         Writes = writes;
         DirtyIndex = dirtyIndex;
@@ -150,7 +155,7 @@ internal readonly struct DeviceCollection
         }
         if ((uint)index >= (uint)collection.Length)
         {
-            collection.Context.Fail(3);
+            collection.Context.Fail(collection.IndexErrorCode == 0 ? 3 : collection.IndexErrorCode);
             return false;
         }
         return true;
@@ -183,7 +188,7 @@ internal readonly struct DeviceCollection
         new(collection.Bytes, collection.Length, collection.Rows, collection.Columns,
             collection.RowMetadata, collection.ElementSize, collection.Writes, collection.DirtyIndex,
             collection.ShapeMetadata, collection.ShapeOffset, collection.Rank, collection.RowOffset,
-            collection.Identity, context, collection.IsReadOnly);
+            collection.Identity, context, collection.IsReadOnly, collection.IndexErrorCode);
 
     /// <summary>Atomically marks a leaf for copy-back.</summary>
     /// <param name="collection">The leaf view.</param>
@@ -276,7 +281,8 @@ internal readonly struct DeviceCollection
             length, rowMetadata: collection.RowMetadata, elementSize: collection.ElementSize,
             writes: collection.Writes, dirtyIndex: dirtyIndex,
             shapeMetadata: collection.ShapeMetadata, shapeOffset: shapeOffset, rank: rank,
-            rowOffset: leaf ? 0 : offset, identity: identity, context: collection.Context, readOnly: collection.IsReadOnly);
+            rowOffset: leaf ? 0 : offset, identity: identity, context: collection.Context, readOnly: collection.IsReadOnly,
+            indexErrorCode: collection.IndexErrorCode);
     }
 
     /// <summary>Creates the null collection reference representation.</summary>

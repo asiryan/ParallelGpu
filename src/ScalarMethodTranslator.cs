@@ -5,7 +5,7 @@ namespace ParallelGpu;
 
 /// <summary>Maps helper methods and constructors to the device representations of their value types.</summary>
 /// <remarks>Compatible methods retain their original implementation unless a signature, local,
-/// field, or transitive call needs character or structure translation.</remarks>
+/// field, transitive call, or numeric operation needs representation conversion or deferred error guards.</remarks>
 internal sealed class ScalarMethodTranslator
 {
     /// <summary>The generated type containing translated static helpers.</summary>
@@ -70,6 +70,9 @@ internal sealed class ScalarMethodTranslator
             return existing;
         if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
             return method;
+        DeviceNumericMethods.Validate(method);
+        if (DeviceNumericMethods.IsLowered(method))
+            return method.Name == nameof(Math.Clamp) ? TranslateClamp(method) : TranslateArithmeticMethod(method);
         DeviceInstructionValidation.ValidateCallGraph(method, validated);
         if (RequiresTranslation(method, new HashSet<MethodBase>()))
             return TranslateCore(method);
@@ -166,6 +169,9 @@ internal sealed class ScalarMethodTranslator
             if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
                 LoopStackTypes.TryEmitReferenceOperation(il, instruction, stack, labels, emitContext))
                 continue;
+            if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
+                TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
+                continue;
             if (LambdaKernel.TryArrayOperation(il, instruction))
                 continue;
             if (instruction.Operand is ConstructorInfo constructor &&
@@ -233,23 +239,138 @@ internal sealed class ScalarMethodTranslator
         il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(value));
         il.Emit(OpCodes.Ret);
     }
-    /// <summary>Checks whether a signature, local, field, or transitive call needs value translation.</summary>
+    internal static bool TryEmitArithmetic(ILGenerator il, LoopInstruction instruction,
+        Type?[] stack, Action<ILGenerator> emitContext)
+    {
+        if (DeviceArithmetic.IsNarrowingConversion(instruction.Code))
+        {
+            // CIL narrows the value but leaves an I4 on the evaluation stack. Keep the
+            // backend phi inputs as Int32 instead of merging signed Int8/Int16 values.
+            bool unsignedNarrow = instruction.Code == OpCodes.Conv_U1 || instruction.Code == OpCodes.Conv_U2;
+            int bits = instruction.Code == OpCodes.Conv_I1 || instruction.Code == OpCodes.Conv_U1 ? 8 : 16;
+            il.Emit(unsignedNarrow ? OpCodes.Conv_U4 : OpCodes.Conv_I4);
+            if (unsignedNarrow)
+            {
+                il.Emit(OpCodes.Ldc_I4, (1 << bits) - 1);
+                il.Emit(OpCodes.And);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldc_I4, 32 - bits);
+                il.Emit(OpCodes.Shl);
+                il.Emit(OpCodes.Ldc_I4, 32 - bits);
+                il.Emit(OpCodes.Shr);
+            }
+            return true;
+        }
+        if (!DeviceArithmetic.IsDivision(instruction.Code))
+            return false;
+        int width = stack.Length < 2 ? -1 : DeviceArithmetic.IntegerWidth(stack[^2]);
+        if (width == 0)
+            return false;
+        if (width < 0)
+            throw new NotSupportedException("Cannot determine the integer width for checked device arithmetic.");
+        bool unsigned = instruction.Code == OpCodes.Div_Un || instruction.Code == OpCodes.Rem_Un;
+        bool remainder = instruction.Code == OpCodes.Rem || instruction.Code == OpCodes.Rem_Un;
+        string name = (remainder ? "Remainder" : "Divide") + (unsigned ? "UInt" : "Int") + width;
+        emitContext(il);
+        il.Emit(OpCodes.Call, typeof(DeviceArithmetic).GetMethod(name)!);
+        return true;
+    }
+
+    private MethodInfo TranslateArithmeticMethod(MethodInfo original)
+    {
+        var type = original.ReturnType;
+        var parameters = original.GetParameters();
+        var builder = helpers.DefineMethod(original.Name + methods.Count, MethodAttributes.Public | MethodAttributes.Static,
+            type, parameters.Select(parameter => parameter.ParameterType).Append(typeof(DeviceExecutionContext)).ToArray());
+        methods.Add(original, builder);
+        var il = builder.GetILGenerator();
+        string suffix = type == typeof(sbyte) ? "Int8" : type == typeof(short) ? "Int16" :
+            type == typeof(int) ? "Int32" : type == typeof(long) ? "Int64" :
+            type == typeof(float) ? "Single" : "Double";
+        for (int i = 0; i <= parameters.Length; i++)
+            il.Emit(OpCodes.Ldarg, (short)i);
+        il.Emit(OpCodes.Call, typeof(DeviceArithmetic).GetMethod(original.Name + suffix)!);
+        il.Emit(OpCodes.Ret);
+        return builder;
+    }
+    private MethodInfo TranslateClamp(MethodInfo original)
+    {
+        var type = original.ReturnType;
+        var builder = helpers.DefineMethod("Clamp" + methods.Count, MethodAttributes.Public | MethodAttributes.Static,
+            type, [type, type, type, typeof(DeviceExecutionContext)]);
+        methods.Add(original, builder);
+        var il = builder.GetILGenerator();
+        var valid = il.DefineLabel();
+        var minimum = il.DefineLabel();
+        var maximum = il.DefineLabel();
+        bool unsigned = type == typeof(byte) || type == typeof(ushort) || type == typeof(uint) || type == typeof(ulong);
+        // Use ordered comparisons for floating-point NaN, matching Math.Clamp.
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Ldarg_2);
+        il.Emit(unsigned ? OpCodes.Cgt_Un : OpCodes.Cgt);
+        il.Emit(OpCodes.Brfalse, valid);
+        il.Emit(OpCodes.Ldarga_S, (byte)3);
+        il.Emit(OpCodes.Ldc_I4, 10);
+        il.Emit(OpCodes.Call, typeof(DeviceExecutionContext).GetMethod(nameof(DeviceExecutionContext.Fail))!);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ret);
+        il.MarkLabel(valid);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(unsigned ? OpCodes.Blt_Un : OpCodes.Blt, minimum);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldarg_2);
+        il.Emit(unsigned ? OpCodes.Bgt_Un : OpCodes.Bgt, maximum);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ret);
+        il.MarkLabel(minimum);
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Ret);
+        il.MarkLabel(maximum);
+        il.Emit(OpCodes.Ldarg_2);
+        il.Emit(OpCodes.Ret);
+        return builder;
+    }
+
+    /// <summary>Checks whether a signature, local, field, transitive call, or numeric operation needs translation.</summary>
     /// <param name="method">The helper to inspect.</param>
     /// <param name="visited">The methods already inspected along the current call graph.</param>
-    /// <returns>True when character or structure translation is required.</returns>
+    /// <returns>True when value mapping or guarded numeric translation is required.</returns>
     private static bool RequiresTranslation(MethodBase method, HashSet<MethodBase> visited)
     {
         if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly || !visited.Add(method))
             return false;
+        if (DeviceNumericMethods.IsMath(method))
+        {
+            DeviceNumericMethods.Validate(method);
+            return DeviceNumericMethods.IsLowered(method);
+        }
         if ((!method.IsStatic && MapType(method.DeclaringType!) != method.DeclaringType) ||
             (method is MethodInfo info && MapType(info.ReturnType) != info.ReturnType) ||
             method.GetParameters().Any(parameter => MapType(parameter.ParameterType) != parameter.ParameterType))
             return true;
+
         var body = method.GetMethodBody();
         if (body is null)
             return false;
         if (body.LocalVariables.Any(local => MapType(local.LocalType) != local.LocalType))
             return true;
+        if (body.ExceptionHandlingClauses.Count == 0)
+        {
+            var instructions = LoopIL.Read(method);
+            if (instructions.Any(instruction => DeviceArithmetic.IsNarrowingConversion(instruction.Code)))
+                return true;
+            if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code)))
+            {
+                var stacks = LoopStackTypes.Analyze(method, instructions);
+                if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code) &&
+                    stacks.TryGetValue(instruction.Offset, out var stack) && stack.Length >= 2 &&
+                    DeviceArithmetic.IntegerWidth(stack[^2]) != 0))
+                    return true;
+            }
+        }
         return body.ExceptionHandlingClauses.Count == 0 &&
             LoopIL.Read(method).Any(instruction =>
                 (instruction.Operand is MethodBase called && RequiresTranslation(called, visited)) ||

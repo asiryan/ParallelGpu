@@ -134,14 +134,20 @@ public static class GpuCollectionAdapters
             return new(segment.Array ?? Array.Empty<T>(), segment.Offset, segment.Count, readOnly);
         if (MemoryMarshal.TryGetMemoryManager<T, MemoryManager<T>>(memory, out var manager, out int start, out int length))
         {
-            if (!snapshots.TryGetValue(manager!, out var previous))
+            var storage = manager!.GetSpan();
+            if (!snapshots.TryGetValue(manager, out var previous))
             {
-                var captured = new GpuCollectionSnapshot<T>(manager!.GetSpan().ToArray(),
+                previous = new GpuCollectionSnapshot<T>(storage.ToArray(),
                     commit: values => values.AsSpan().CopyTo(manager.GetSpan()), identity: manager);
-                snapshots.Add(manager, captured);
-                previous = captured;
+                snapshots.Add(manager, previous);
             }
-            var shared = (GpuCollectionSnapshot<T>)previous;
+            if (previous is not GpuCollectionSnapshot<T> shared || shared.Buffer.Length != storage.Length)
+                throw new InvalidOperationException("Snapshots sharing a storage identity must use the same element type and full buffer length.");
+            if (shared.Commit is null)
+            {
+                shared = new(shared.Buffer, commit: values => values.AsSpan().CopyTo(manager.GetSpan()), identity: manager);
+                snapshots[manager] = shared;
+            }
             return new(shared.Buffer, start, length, readOnly, shared.Commit, manager);
         }
         if (typeof(T) == typeof(char) && MemoryMarshal.TryGetString((ReadOnlyMemory<char>)(object)memory,
@@ -152,7 +158,9 @@ public static class GpuCollectionAdapters
                 previous = new GpuCollectionSnapshot<T>((T[])(object)text!.ToCharArray(), true, identity: text);
                 snapshots.Add(text!, previous);
             }
-            return new(((GpuCollectionSnapshot<T>)previous).Buffer, stringStart, stringLength, true, identity: text);
+            if (previous is not GpuCollectionSnapshot<T> shared || shared.Buffer.Length != text!.Length)
+                throw new InvalidOperationException("Snapshots sharing a storage identity must use the same element type and full buffer length.");
+            return new(shared.Buffer, stringStart, stringLength, true, identity: text);
         }
         throw new NotSupportedException("The memory owner cannot expose GPU-compatible contiguous storage.");
     }
