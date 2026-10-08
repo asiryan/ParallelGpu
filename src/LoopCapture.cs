@@ -12,12 +12,14 @@ internal sealed record LoopCapture(FieldInfo[] Path, FieldInfo Destination, Type
     /// <param name="target">The current delegate closure, or null for a static body.</param>
     /// <returns>The non-null captured value.</returns>
     /// <exception cref="ArgumentException">A captured object or collection is null.</exception>
-    internal object Read(object? target)
+    internal object? Read(object? target)
     {
         object? value = target;
         foreach (var field in Path)
             value = field.GetValue(field.IsStatic ? null : value ??
                 throw new ArgumentException("A captured object is null.", "body"));
+        if (Element is not null || Nullable.GetUnderlyingType(Path[^1].FieldType) is not null)
+            return value;
         return value ?? throw new ArgumentException(
             $"Captured collection '{Path[^1].Name}' is null.", "body");
     }

@@ -39,7 +39,7 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using the shared default GPU executor.</summary>
-    /// <typeparam name="T">The element type of every captured collection: a primitive, enum, or device-compatible structure without managed references.</typeparam>
+    /// <typeparam name="T">The element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
@@ -49,7 +49,7 @@ public static class GpuParallel
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
     /// <exception cref="NotSupportedException">The element type, body, or a collection is unsupported.</exception>
     /// <exception cref="InvalidOperationException">No default GPU accelerator can be initialized.</exception>
-    public static void For<T>(int fromInclusive, int toExclusive, Action<int> body) where T : unmanaged
+    public static void For<T>(int fromInclusive, int toExclusive, Action<int> body)
     {
         if (body is null)
             throw new ArgumentNullException(nameof(body));
@@ -82,7 +82,7 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using an executor created from the supplied device options.</summary>
-    /// <typeparam name="T">The element type of every captured collection: a primitive, enum, or device-compatible structure without managed references.</typeparam>
+    /// <typeparam name="T">The element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
@@ -94,7 +94,6 @@ public static class GpuParallel
     /// <exception cref="NotSupportedException">The element type, body, or a collection is unsupported.</exception>
     /// <exception cref="InvalidOperationException">No eligible accelerator can be initialized.</exception>
     public static void For<T>(int fromInclusive, int toExclusive, GpuOptions options, Action<int> body)
-        where T : unmanaged
     {
         if (options is null)
             throw new ArgumentNullException(nameof(options));

@@ -25,12 +25,12 @@ internal static class DeviceValueType
     /// <summary>Provides distinct generated converter type names.</summary>
     private static int converterCount;
     /// <summary>Boxed converters for structure values captured in loop closures.</summary>
-    private static readonly ConcurrentDictionary<Type, Func<object, object>> converters = new();
+    private static readonly ConcurrentDictionary<Type, Func<object?, object>> converters = new();
 
     /// <summary>Checks primitives, enums, and recursively composed structures without managed references.</summary>
     /// <param name="type">The candidate value type.</param>
     /// <returns>True when all instance fields use supported device values.</returns>
-    /// <remarks>Explicit layouts, nullable values, and native pointers are unsupported.
+    /// <remarks>Explicit layouts and native pointers are unsupported. Nullable values use a mapped presence flag and payload.
     /// Method compatibility is checked separately by the device compiler.</remarks>
     internal static bool IsSupported(Type type) => supported.GetOrAdd(type, candidate =>
     {
@@ -39,7 +39,7 @@ internal static class DeviceValueType
         if (candidate.IsPrimitive)
             return candidate != typeof(IntPtr) && candidate != typeof(UIntPtr);
         return candidate != typeof(void) && candidate.IsValueType && !candidate.IsByRefLike &&
-            !candidate.IsExplicitLayout && Nullable.GetUnderlyingType(candidate) is null && Fields(candidate).All(field => IsSupported(field.FieldType));
+            !candidate.IsExplicitLayout && Fields(candidate).All(field => IsSupported(field.FieldType));
     });
 
     /// <summary>Gets instance fields in their metadata order, including private and readonly fields.</summary>
@@ -98,7 +98,7 @@ internal static class DeviceValueType
     /// <param name="value">The boxed host value.</param>
     /// <param name="type">The original structure type.</param>
     /// <returns>A boxed value suitable for the generated capture field.</returns>
-    internal static object ToDevice(object value, Type type) => MapType(type) == type ? value :
+    internal static object ToDevice(object? value, Type type) => MapType(type) == type ? value! :
         converters.GetOrAdd(type, source =>
         {
             lock (sync)
@@ -110,8 +110,8 @@ internal static class DeviceValueType
                 EmitConversion(il, source, MapType(source));
                 il.Emit(OpCodes.Box, MapType(source));
                 il.Emit(OpCodes.Ret);
-                return (Func<object, object>)builder.CreateType()!.GetMethod(method.Name)!
-                    .CreateDelegate(typeof(Func<object, object>));
+                return (Func<object?, object>)builder.CreateType()!.GetMethod(method.Name)!
+                    .CreateDelegate(typeof(Func<object?, object>));
             }
         })(value);
 
@@ -120,7 +120,6 @@ internal static class DeviceValueType
     /// <typeparam name="TTarget">The requested value representation.</typeparam>
     /// <returns>A converter that copies and converts all instance fields.</returns>
     internal static Func<TSource, TTarget> Converter<TSource, TTarget>()
-        where TSource : unmanaged where TTarget : unmanaged
     {
         lock (sync)
         {

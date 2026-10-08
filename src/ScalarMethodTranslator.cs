@@ -14,17 +14,51 @@ internal sealed class ScalarMethodTranslator
     private readonly Dictionary<MethodBase, MethodInfo> methods = new();
     /// <summary>Readonly static values whose representation changes inside translated helpers.</summary>
     private readonly Dictionary<FieldInfo, FieldBuilder> staticValues = new();
+    private readonly CollectionMethodTranslator collections;
+    private readonly HashSet<MethodBase> validated = new();
 
     /// <summary>Creates a helper type in the same module as the generated loop.</summary>
     /// <param name="module">The dynamic module owning the loop and its helpers.</param>
-    internal ScalarMethodTranslator(ModuleBuilder module) =>
+    internal ScalarMethodTranslator(ModuleBuilder module)
+    {
         helpers = module.DefineType("ScalarHelpers",
             TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+        collections = new CollectionMethodTranslator(helpers);
+    }
 
     /// <summary>Maps full-width character values and device-compatible structures, including references.</summary>
     /// <param name="type">The original value or reference type.</param>
     /// <returns>The corresponding device-compatible type.</returns>
-    internal static Type MapType(Type type) => DeviceValueType.MapType(type);
+    internal static Type MapType(Type type)
+    {
+        if (type.IsByRef)
+            return MapType(type.GetElementType()!).MakeByRefType();
+        if (DeviceNativeTypes.IsSupported(type))
+        {
+            DeviceNativeTypes.Validate(type);
+            return type;
+        }
+        return CapturedCollection.ElementType(type) is not null
+            ? typeof(DeviceCollection) : DeviceValueType.MapType(type);
+    }
+
+    internal static bool IsCompatible(Type type) => type == typeof(void) ||
+        DeviceValueType.IsSupported(type.IsByRef ? type.GetElementType()! : type) ||
+        DeviceNativeTypes.IsSupported(type.IsByRef ? type.GetElementType()! : type) ||
+        CapturedCollection.ElementType(type.IsByRef ? type.GetElementType()! : type) is not null;
+
+    internal void EmitCall(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext)
+    {
+        if (collections.TryEmit(il, method))
+            return;
+        if ((!method.IsStatic && !IsCompatible(method.DeclaringType!)) ||
+            !IsCompatible(method.ReturnType) || method.GetParameters().Any(p => !IsCompatible(p.ParameterType)))
+            throw new NotSupportedException($"Method '{method.DeclaringType!.FullName}.{method.Name}' is not device-compatible.");
+        var replacement = Translate(method);
+        if (replacement != method)
+            emitContext(il);
+        il.Emit(OpCodes.Call, replacement);
+    }
 
     /// <summary>Gets a method using the device representations of its values.</summary>
     /// <param name="method">The original method.</param>
@@ -34,6 +68,9 @@ internal sealed class ScalarMethodTranslator
     {
         if (methods.TryGetValue(method, out var existing))
             return existing;
+        if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
+            return method;
+        DeviceInstructionValidation.ValidateCallGraph(method, validated);
         if (RequiresTranslation(method, new HashSet<MethodBase>()))
             return TranslateCore(method);
         methods.Add(method, method);
@@ -44,14 +81,17 @@ internal sealed class ScalarMethodTranslator
     /// <param name="il">The destination IL generator.</param>
     /// <param name="code">The original call or construction instruction.</param>
     /// <param name="constructor">The value constructor.</param>
+    /// <param name="emitContext">Emits the current invocation error context.</param>
     /// <exception cref="NotSupportedException">The constructor uses managed objects or unsupported parameters.</exception>
-    internal void EmitConstructor(ILGenerator il, OpCode code, ConstructorInfo constructor)
+    internal void EmitConstructor(ILGenerator il, OpCode code, ConstructorInfo constructor, Action<ILGenerator> emitContext)
     {
+        if (collections.TryEmitConstructor(il, code, constructor))
+            return;
         var parameters = constructor.GetParameters();
         if (!DeviceValueType.IsSupported(constructor.DeclaringType!) ||
-            parameters.Any(parameter => !DeviceValueType.IsSupported(parameter.ParameterType.IsByRef
-                ? parameter.ParameterType.GetElementType()! : parameter.ParameterType)))
+            parameters.Any(parameter => !IsCompatible(parameter.ParameterType)))
             throw new NotSupportedException($"Constructor '{constructor.DeclaringType}' is not supported inside GPU loops.");
+        DeviceInstructionValidation.ValidateCallGraph(constructor, validated);
         if (!RequiresTranslation(constructor, new HashSet<MethodBase>()))
         {
             il.Emit(code, constructor);
@@ -60,6 +100,7 @@ internal sealed class ScalarMethodTranslator
         var replacement = TranslateCore(constructor);
         if (code != OpCodes.Newobj)
         {
+            emitContext(il);
             il.Emit(OpCodes.Call, replacement);
             return;
         }
@@ -73,6 +114,7 @@ internal sealed class ScalarMethodTranslator
         il.Emit(OpCodes.Ldloca, value);
         foreach (var argument in arguments)
             il.Emit(OpCodes.Ldloc, argument);
+        emitContext(il);
         il.Emit(OpCodes.Call, replacement);
         il.Emit(OpCodes.Ldloc, value);
     }
@@ -87,12 +129,21 @@ internal sealed class ScalarMethodTranslator
         var parameters = method.GetParameters().Select(parameter => MapType(parameter.ParameterType));
         if (!method.IsStatic)
             parameters = parameters.Prepend(MapType(method.DeclaringType!.MakeByRefType()));
+        int contextArgument = parameters.Count();
+        parameters = parameters.Append(typeof(DeviceExecutionContext));
         var returnType = method is MethodInfo info ? MapType(info.ReturnType) : typeof(void);
         var replacement = helpers.DefineMethod("Value" + methods.Count,
             MethodAttributes.Public | MethodAttributes.Static, returnType, parameters.ToArray());
         // Register before translating calls so recursive references resolve to the same generated method.
         methods.Add(method, replacement);
         var il = replacement.GetILGenerator();
+        Action<ILGenerator> emitContext = target => target.Emit(OpCodes.Ldarg, (short)contextArgument);
+        if (method is MethodInfo nullableValue && nullableValue.Name == "get_Value" &&
+            Nullable.GetUnderlyingType(method.DeclaringType!) is not null)
+        {
+            EmitNullableValue(il, nullableValue, emitContext);
+            return replacement;
+        }
         foreach (var local in method.GetMethodBody()!.LocalVariables)
         {
             if (local.IsPinned)
@@ -100,22 +151,36 @@ internal sealed class ScalarMethodTranslator
             il.DeclareLocal(MapType(local.LocalType));
         }
         var instructions = LoopIL.Read(method);
+        var stackTypes = LoopStackTypes.Analyze(method, instructions);
         var labels = instructions.ToDictionary(instruction => instruction.Offset, _ => il.DefineLabel());
         foreach (var instruction in instructions)
         {
             il.MarkLabel(labels[instruction.Offset]);
+            if (instruction.Code == OpCodes.Initobj && instruction.Operand is Type initialized &&
+                initialized.IsValueType && CapturedCollection.ElementType(initialized) is not null)
+            {
+                emitContext(il);
+                il.Emit(OpCodes.Call, typeof(DeviceCollectionSlice).GetMethod(nameof(DeviceCollectionSlice.Initialize))!);
+                continue;
+            }
+            if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
+                LoopStackTypes.TryEmitReferenceOperation(il, instruction, stack, labels, emitContext))
+                continue;
+            if (LambdaKernel.TryArrayOperation(il, instruction))
+                continue;
             if (instruction.Operand is ConstructorInfo constructor &&
                 (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Newobj))
             {
-                EmitConstructor(il, instruction.Code, constructor);
+                EmitConstructor(il, instruction.Code, constructor, emitContext);
                 continue;
             }
             if (instruction.Operand is MethodInfo called &&
                 (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt))
             {
-                il.Emit(OpCodes.Call, Translate(called));
+                EmitCall(il, called, emitContext);
                 continue;
             }
+            DeviceInstructionValidation.Validate(instruction);
             if (instruction.Operand is FieldInfo field)
             {
                 if (field.DeclaringType == typeof(char))
@@ -148,13 +213,33 @@ internal sealed class ScalarMethodTranslator
         return replacement;
     }
 
+    private static void EmitNullableValue(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext)
+    {
+        var fields = method.DeclaringType!.GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
+        var present = fields.Single(field => field.FieldType == typeof(bool));
+        var value = fields.Single(field => field.Name == "value");
+        var available = il.DefineLabel();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(present));
+        il.Emit(OpCodes.Brtrue, available);
+        emitContext(il);
+        var context = il.DeclareLocal(typeof(DeviceExecutionContext));
+        il.Emit(OpCodes.Stloc, context);
+        il.Emit(OpCodes.Ldloca, context);
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Call, typeof(DeviceExecutionContext).GetMethod(nameof(DeviceExecutionContext.Fail))!);
+        il.MarkLabel(available);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(value));
+        il.Emit(OpCodes.Ret);
+    }
     /// <summary>Checks whether a signature, local, field, or transitive call needs value translation.</summary>
     /// <param name="method">The helper to inspect.</param>
     /// <param name="visited">The methods already inspected along the current call graph.</param>
     /// <returns>True when character or structure translation is required.</returns>
     private static bool RequiresTranslation(MethodBase method, HashSet<MethodBase> visited)
     {
-        if (!visited.Add(method))
+        if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly || !visited.Add(method))
             return false;
         if ((!method.IsStatic && MapType(method.DeclaringType!) != method.DeclaringType) ||
             (method is MethodInfo info && MapType(info.ReturnType) != info.ReturnType) ||

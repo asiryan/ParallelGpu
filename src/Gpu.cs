@@ -234,6 +234,8 @@ public sealed partial class Gpu : IDisposable
             lambdaKernels.Clear();
             forKernels.Clear();
             forEachKernels.Clear();
+            reductionKernels.Clear();
+            collectKernels.Clear();
             accelerator.Dispose();
             context.Dispose();
             disposed = true;
@@ -315,4 +317,3 @@ public sealed partial class Gpu : IDisposable
             failures.Count > 0 ? new AggregateException(failures) : null);
     }
 }
-

@@ -1,15 +1,28 @@
 namespace ParallelGpu;
 
-/// <summary>Describes a jagged row's slice in a packed device buffer.</summary>
-/// <param name="offset">The row's element offset in the device buffer.</param>
-/// <param name="length">The number of row elements.</param>
-/// <param name="dirtyIndex">The index of the row's shared write flag.</param>
-internal readonly struct RowDescriptor(int offset, int length, int dirtyIndex)
+/// <summary>Describes one nested-array child in a shared metadata table.</summary>
+/// <param name="offset">The leaf's element offset or the container's child-table offset.</param>
+/// <param name="length">The flat element or child count, or minus one for null.</param>
+/// <param name="dirtyIndex">The shared leaf write-flag index, or minus one for a container.</param>
+/// <param name="shapeOffset">The first dimension's metadata offset.</param>
+/// <param name="rank">The array rank.</param>
+/// <param name="identity">The invocation-local host reference identity.</param>
+internal readonly struct RowDescriptor(int offset, int length, int dirtyIndex, int shapeOffset, int rank, int identity)
 {
-    /// <summary>The row's element offset in the packed device buffer.</summary>
+    /// <summary>The number of integers in each packed descriptor.</summary>
+    internal const int Width = 6;
+    /// <summary>The leaf data or child-table offset.</summary>
     public readonly int Offset = offset;
-    /// <summary>The number of elements in the row.</summary>
+    /// <summary>The flat count; minus one denotes null.</summary>
     public readonly int Length = length;
-    /// <summary>The write-flag index shared by all aliases of the row.</summary>
+    /// <summary>The leaf's shared write-flag index, or minus one for a container.</summary>
     public readonly int DirtyIndex = dirtyIndex;
+    /// <summary>The first dimension's metadata offset.</summary>
+    public readonly int ShapeOffset = shapeOffset;
+    /// <summary>The array rank.</summary>
+    public readonly int Rank = rank;
+    /// <summary>The shared host reference identity.</summary>
+    public readonly int Identity = identity;
+    /// <summary>The null child descriptor.</summary>
+    internal static RowDescriptor Null => new(0, -1, -1, -1, 1, 0);
 }

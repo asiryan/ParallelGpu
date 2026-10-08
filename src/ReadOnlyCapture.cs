@@ -9,30 +9,41 @@ internal static class ReadOnlyCapture
     /// <summary>Checks the consumption of an address loaded from a closure value.</summary>
     /// <param name="instructions">The original loop instructions.</param>
     /// <param name="position">The instruction that loads the captured value's address.</param>
+    /// <param name="collection">Whether indexed writes through the captured view are allowed.</param>
     /// <exception cref="NotSupportedException">The address can be written, passed by reference, or escape.</exception>
-    internal static void Validate(List<LoopInstruction> instructions, int position)
+    internal static void Validate(List<LoopInstruction> instructions, int position, bool collection = false)
     {
         // Follow branches while the address is live, tracking only the stack suffix above this capture.
         var offsets = instructions.Select((instruction, index) => (instruction.Offset, index))
             .ToDictionary(item => item.Offset, item => item.index);
-        var pending = new Queue<(int Position, List<bool> Stack)>();
+        var pending = new Queue<(int Position, List<bool> Stack, HashSet<int> Locals)>();
         var visited = new HashSet<string>();
-        pending.Enqueue((position + 1, new List<bool> { true }));
+        pending.Enqueue((position + 1, new List<bool> { true }, new HashSet<int>()));
         while (pending.Count > 0)
         {
-            var (current, stack) = pending.Dequeue();
-            if (!stack.Contains(true))
+            var (current, stack, locals) = pending.Dequeue();
+            if (!stack.Contains(true) && locals.Count == 0)
                 continue;
             if (current >= instructions.Count)
                 throw Unsupported();
-            string key = current + ":" + string.Concat(stack.Select(value => value ? '1' : '0'));
+            string key = current + ":" + string.Concat(stack.Select(value => value ? '1' : '0')) +
+                ":" + string.Join(",", locals.OrderBy(value => value));
             if (!visited.Add(key))
                 continue;
             var instruction = instructions[current];
             var code = instruction.Code;
+            if (collection && code.FlowControl == FlowControl.Return && !stack.Contains(true))
+                continue;
             if (code.FlowControl is FlowControl.Return or FlowControl.Throw)
                 throw Unsupported();
-            if (code == OpCodes.Dup)
+            if (collection && code.Name!.StartsWith("stloc", StringComparison.Ordinal))
+            {
+                int local = Local(instruction);
+                if (Pop(stack)) locals.Add(local); else locals.Remove(local);
+            }
+            else if (collection && code.Name!.StartsWith("ldloc", StringComparison.Ordinal))
+                stack.Add(locals.Contains(Local(instruction)));
+            else if (code == OpCodes.Dup)
                 stack.Add(stack[^1]);
             else if (instruction.Operand is MethodBase called &&
                 (code == OpCodes.Call || code == OpCodes.Callvirt || code == OpCodes.Newobj))
@@ -42,8 +53,9 @@ internal static class ReadOnlyCapture
                         throw Unsupported(); // A ref helper can mutate the capture even with a void result.
                 if (code != OpCodes.Newobj && !called.IsStatic && Pop(stack))
                 {
-                    if (called is not MethodInfo method || method.ReturnType.IsByRef ||
-                        !IsReadOnly(method, new HashSet<MethodInfo>()))
+                    if (called is not MethodInfo method ||
+                        !(collection && IsCollectionMember(method)) &&
+                        (method.ReturnType.IsByRef || !IsReadOnly(method, new HashSet<MethodInfo>())))
                         throw Unsupported();
                 }
                 if (code == OpCodes.Newobj || called is MethodInfo info && info.ReturnType != typeof(void))
@@ -70,14 +82,26 @@ internal static class ReadOnlyCapture
             {
                 var targets = instruction.Operand is int[] choices ? choices : [(int)instruction.Operand!];
                 foreach (int target in targets)
-                    pending.Enqueue((offsets[target], new List<bool>(stack)));
+                    pending.Enqueue((offsets[target], new List<bool>(stack), new HashSet<int>(locals)));
                 if (code.FlowControl == FlowControl.Branch)
                     continue;
             }
-            pending.Enqueue((current + 1, stack));
+            pending.Enqueue((current + 1, stack, locals));
         }
     }
 
+    private static int Local(LoopInstruction instruction) => instruction.Code.Name! switch
+    {
+        "ldloc.0" or "stloc.0" => 0,
+        "ldloc.1" or "stloc.1" => 1,
+        "ldloc.2" or "stloc.2" => 2,
+        "ldloc.3" or "stloc.3" => 3,
+        _ => (int)instruction.Operand!
+    };
+
+    private static bool IsCollectionMember(MethodInfo method) =>
+        CapturedCollection.ElementType(method.DeclaringType!) is not null &&
+        method.Name is "get_Item" or "set_Item" or "get_Count" or "get_Length" or "get_Span" or "get_IsEmpty" or "Slice";
     /// <summary>Pops a tracked reference, treating stack values below the capture as unrelated.</summary>
     /// <param name="stack">The tracked suffix of the evaluation stack.</param>
     /// <returns>True if the popped value is derived from the capture address.</returns>

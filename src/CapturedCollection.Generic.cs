@@ -1,35 +1,45 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.InteropServices;
+
 namespace ParallelGpu;
 
-/// <summary>Maps one flat array, list, or rectangular array to a slice of a packed device buffer.</summary>
-/// <typeparam name="T">The supported host element type.</typeparam>
-internal sealed class CapturedCollection<T> : CapturedCollection where T : unmanaged
+/// <summary>Maps a leaf array of any rank or a list to a packed device-buffer slice.</summary>
+/// <typeparam name="T">The supported host leaf element type.</typeparam>
+internal sealed class CapturedCollection<T> : CapturedCollection
 {
-    /// <summary>The original host collection updated when this slice is copied back.</summary>
+    /// <summary>Returns a reference to an array's physical first element.</summary>
+    /// <param name="array">The nonempty leaf array.</param>
+    /// <returns>A reference to its first element.</returns>
+    private delegate ref T FirstElement(Array array);
+    /// <summary>Rank-specific host address getters, shared across invocations.</summary>
+    private static readonly ConcurrentDictionary<Type, FirstElement> firstElements = new();
+    /// <summary>The original host collection.</summary>
     private readonly object source;
-    /// <summary>The invocation registry providing the shared write flags.</summary>
+    /// <summary>The invocation's shared metadata and write flags.</summary>
     private readonly CollectionTransfers transfers;
-    /// <summary>The typed batch containing this collection's packed device slice.</summary>
+    /// <summary>The batch containing this leaf's packed slice.</summary>
     private readonly CollectionBatch<T> batch;
-    /// <summary>The rectangular row count, or minus one for a flat collection.</summary>
-    private readonly int rows = -1;
-    /// <summary>The rectangular column count used for row-major addressing.</summary>
-    private readonly int columns;
+    /// <summary>The dimension metadata offset.</summary>
+    private readonly int shapeOffset;
+    /// <summary>The leaf array rank; lists have rank one.</summary>
+    private readonly int rank;
 
-    /// <summary>Gets the flat host data used when packing the device buffer.</summary>
-    /// <remarks>Flat arrays are used directly; lists and rectangular arrays are flattened into snapshots.</remarks>
+    /// <summary>Gets the flattened data; native flat arrays are used directly.</summary>
     internal T[] Snapshot { get; }
-    /// <summary>Gets the element offset of this collection in its packed device buffer.</summary>
+    /// <summary>Gets the element offset in the packed buffer.</summary>
     internal int Offset { get; }
-    /// <summary>Gets the index of this collection's device write flag.</summary>
+    /// <summary>Gets the shared write-flag index.</summary>
     internal int DirtyIndex { get; }
-    /// <summary>Gets row metadata that preserves aliases to this collection in jagged arrays.</summary>
-    internal RowDescriptor Row => new(Snapshot.Length == 0 ? 0 : Offset,
-        Snapshot.Length, DirtyIndex);
+    /// <inheritdoc/>
+    internal override RowDescriptor Row => new(Snapshot.Length == 0 ? 0 : Offset,
+        Snapshot.Length, DirtyIndex, shapeOffset, rank, Identity);
 
-    /// <summary>Snapshots a host collection and reserves its buffer slice and write flag.</summary>
-    /// <param name="transfers">The transfer registry for the current invocation.</param>
-    /// <param name="source">A supported array, list, or zero-based rectangular array.</param>
-    /// <exception cref="NotSupportedException">The collection type or array lower bounds are unsupported.</exception>
+    /// <summary>Snapshots a host leaf and reserves its shape, data slice, and write flag.</summary>
+    /// <param name="transfers">The invocation's transfer registry.</param>
+    /// <param name="source">An array of any rank with supported leaf elements, or a list.</param>
+    /// <exception cref="NotSupportedException">The runtime collection is unsupported.</exception>
     internal CapturedCollection(CollectionTransfers transfers, object source)
     {
         this.transfers = transfers;
@@ -38,19 +48,19 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
         {
             case T[] array:
                 Snapshot = array;
+                rank = 1;
+                shapeOffset = transfers.AddShape(array);
                 break;
             case List<T> list:
                 Snapshot = list.ToArray();
+                rank = 1;
+                shapeOffset = transfers.AddFlatShape(list.Count);
                 break;
-            case T[,] matrix:
-                if (matrix.GetLowerBound(0) != 0 || matrix.GetLowerBound(1) != 0)
-                    throw new NotSupportedException("Captured rectangular arrays must have zero lower bounds.");
-                rows = matrix.GetLength(0);
-                columns = matrix.GetLength(1);
-                Snapshot = new T[matrix.Length];
-                for (int row = 0; row < rows; row++)
-                    for (int column = 0; column < columns; column++)
-                        Snapshot[row * columns + column] = matrix[row, column];
+            case Array array when array.GetType().GetElementType() == typeof(T):
+                rank = array.Rank;
+                shapeOffset = transfers.AddShape(array);
+                Snapshot = array.Length == 0 ? Array.Empty<T>() :
+                    MemoryMarshal.CreateReadOnlySpan(ref First(array), array.Length).ToArray();
                 break;
             default:
                 throw new NotSupportedException(
@@ -61,16 +71,45 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
         Offset = batch.Add(this);
     }
 
+    /// <summary>Returns a reference to a nonempty array's first physical element.</summary>
+    /// <param name="array">The host array.</param>
+    /// <returns>The first physical element.</returns>
+    private static ref T First(Array array) => ref firstElements.GetOrAdd(array.GetType(), CreateFirstElement)(array);
+
+    /// <summary>Builds a rank-specific CLR array address getter without per-element boxing.</summary>
+    /// <param name="arrayType">The concrete CLR array type.</param>
+    /// <returns>The cached host address getter.</returns>
+    /// <remarks>The runtime stores rectangular elements contiguously in row-major order.
+    /// Empty arrays never call this getter. Nonzero lower bounds are loaded for every dimension.</remarks>
+    private static FirstElement CreateFirstElement(Type arrayType)
+    {
+        var method = new DynamicMethod("ArrayFirst", typeof(T).MakeByRefType(), [typeof(Array)],
+            typeof(CapturedCollection<T>), true);
+        var il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Castclass, arrayType);
+        var lowerBound = typeof(Array).GetMethod(nameof(Array.GetLowerBound), [typeof(int)])!;
+        for (int dimension = 0; dimension < arrayType.GetArrayRank(); dimension++)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, dimension);
+            il.Emit(OpCodes.Callvirt, lowerBound);
+        }
+        il.Emit(OpCodes.Call, arrayType.GetMethod("Address", BindingFlags.Public | BindingFlags.Instance)!);
+        il.Emit(OpCodes.Ret);
+        return (FirstElement)method.CreateDelegate(typeof(FirstElement));
+    }
+
     /// <inheritdoc/>
     internal override DeviceCollection View => new(
         batch.View.SubView(Snapshot.Length == 0 ? 0 : (long)Offset * batch.ElementSize,
-            (long)Snapshot.Length * batch.ElementSize),
-        Snapshot.Length, rows, columns, elementSize: batch.ElementSize,
-        writes: transfers.Writes, dirtyIndex: DirtyIndex);
+            (long)Snapshot.Length * batch.ElementSize), Snapshot.Length,
+        elementSize: batch.ElementSize, writes: transfers.Writes, dirtyIndex: DirtyIndex,
+        shapeMetadata: transfers.Shapes, shapeOffset: shapeOffset, rank: rank, identity: Identity, context: transfers.Context);
 
-    /// <summary>Writes downloaded elements into the original host collection.</summary>
-    /// <param name="values">The downloaded slice containing exactly this collection's elements.</param>
-    /// <exception cref="InvalidOperationException">A captured list changed length during execution.</exception>
+    /// <summary>Copies the downloaded elements into the original collection.</summary>
+    /// <param name="values">The downloaded leaf slice.</param>
+    /// <exception cref="InvalidOperationException">A list changed length during execution.</exception>
     internal void Apply(ReadOnlySpan<T> values)
     {
         switch (source)
@@ -84,10 +123,8 @@ internal sealed class CapturedCollection<T> : CapturedCollection where T : unman
                 for (int i = 0; i < values.Length; i++)
                     list[i] = values[i];
                 break;
-            case T[,] matrix:
-                for (int row = 0; row < rows; row++)
-                    for (int column = 0; column < columns; column++)
-                        matrix[row, column] = values[row * columns + column];
+            case Array array when array.Length > 0:
+                values.CopyTo(MemoryMarshal.CreateSpan(ref First(array), array.Length));
                 break;
         }
     }

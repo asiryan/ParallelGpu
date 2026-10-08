@@ -1,39 +1,47 @@
 namespace ParallelGpu;
 
-/// <summary>Represents a jagged array through shared leaf slices and packed row metadata.</summary>
-/// <typeparam name="T">The supported row element type.</typeparam>
-/// <remarks>Repeated row references use the same leaf slice and write flag.</remarks>
-internal sealed class CapturedJaggedCollection<T> : CapturedCollection where T : unmanaged
+/// <summary>Represents nested arrays of arbitrary depth through shared leaf and container descriptors.</summary>
+/// <typeparam name="T">The supported ultimate leaf element type.</typeparam>
+/// <remarks>Aliases at every depth share one descriptor identity. Null children and empty
+/// containers retain their distinction. Array topology is fixed during device execution.</remarks>
+internal sealed class CapturedJaggedCollection<T> : CapturedCollection
 {
-    /// <summary>The invocation registry containing shared row metadata and write flags.</summary>
+    /// <summary>The invocation's metadata and write flags.</summary>
     private readonly CollectionTransfers transfers;
-    /// <summary>The typed batch containing all row slices, including rows also captured independently.</summary>
+    /// <summary>The batch containing all ultimate leaves.</summary>
     private readonly CollectionBatch<T> batch;
-    /// <summary>The integer offset of this jagged array's first descriptor in the shared row table.</summary>
+    /// <summary>The first child's metadata offset.</summary>
     private readonly int rowOffset;
-    /// <summary>The number of rows represented by this jagged container.</summary>
+    /// <summary>The flat child count.</summary>
     private readonly int rowCount;
+    /// <summary>The container's dimension metadata offset.</summary>
+    private readonly int shapeOffset;
+    /// <summary>The container's array rank.</summary>
+    private readonly int rank;
 
-    /// <summary>Registers each row and reserves the jagged array's metadata range.</summary>
-    /// <param name="transfers">The transfer registry for the current invocation.</param>
-    /// <param name="source">The jagged array; ragged and empty rows are supported.</param>
-    /// <exception cref="ArgumentException">The array contains a null row.</exception>
-    internal CapturedJaggedCollection(CollectionTransfers transfers, T[][] source)
+    /// <summary>Registers every nonnull child and reserves this container's metadata.</summary>
+    /// <param name="transfers">The invocation's transfer registry.</param>
+    /// <param name="source">The array whose elements are arrays.</param>
+    internal CapturedJaggedCollection(CollectionTransfers transfers, Array source)
     {
         this.transfers = transfers;
-        if (source.Any(row => row is null))
-            throw new ArgumentException("Captured jagged arrays cannot contain null rows.", "body");
-        // Register leaf rows before building descriptors so aliases reuse both offsets and write flags.
+        rank = source.Rank;
+        shapeOffset = transfers.AddShape(source);
         var descriptors = new RowDescriptor[source.Length];
-        for (int i = 0; i < source.Length; i++)
-            descriptors[i] = ((CapturedCollection<T>)transfers.Add<T>(source[i])).Row;
+        int index = 0;
+        foreach (var child in source)
+            descriptors[index++] = child is null ? RowDescriptor.Null : transfers.Add<T>(child).Row;
         rowOffset = transfers.AddRows(descriptors);
         rowCount = source.Length;
         batch = transfers.Batch<T>();
     }
 
     /// <inheritdoc/>
+    internal override RowDescriptor Row => new(rowOffset, rowCount, -1, shapeOffset, rank, Identity);
+
+    /// <inheritdoc/>
     internal override DeviceCollection View => new(batch.View, rowCount,
-        rowMetadata: rowCount == 0 ? default : transfers.Rows.SubView(rowOffset, checked(rowCount * 3)),
-        elementSize: batch.ElementSize, writes: transfers.Writes);
+        rowMetadata: transfers.Rows, elementSize: batch.ElementSize, writes: transfers.Writes,
+        shapeMetadata: transfers.Shapes, shapeOffset: shapeOffset, rank: rank,
+        rowOffset: rowOffset, identity: Identity, context: transfers.Context);
 }

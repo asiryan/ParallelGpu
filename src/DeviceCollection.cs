@@ -2,155 +2,358 @@ using ILGPU;
 
 namespace ParallelGpu;
 
-/// <summary>Provides a device-compatible representation of a captured collection.</summary>
-/// <remarks>Jagged rows refer to slices of the same packed buffer as captured flat arrays.
-/// Kernel access assumes valid indices. Write flags also track references that may be modified.</remarks>
+/// <summary>Provides a device-compatible leaf or nested-array view.</summary>
+/// <remarks>All leaves of the same element type share a packed buffer. Shape metadata stores
+/// length, lower bound, and row-major stride per dimension. Invalid accesses defer an error for host validation.</remarks>
 internal readonly struct DeviceCollection
 {
-    /// <summary>The byte view of the collection slice, or the complete packed buffer for jagged arrays.</summary>
+    /// <summary>The leaf byte slice, or the complete packed buffer for a nested-array container.</summary>
     public readonly ArrayView<byte> Bytes;
-    /// <summary>The flat element count, or the number of rows for a jagged array.</summary>
+    /// <summary>The flat element or child count; minus one denotes a null reference.</summary>
     public readonly int Length;
-    /// <summary>The first dimension's length.</summary>
+    /// <summary>The first dimension's length, retained for legacy flat views.</summary>
     public readonly int Rows;
-    /// <summary>The second dimension's length for a rectangular array.</summary>
+    /// <summary>The second dimension's length, retained for legacy flat views.</summary>
     public readonly int Columns;
-    /// <summary>The jagged row table, with an element offset, length, and write-flag index per row.</summary>
+    /// <summary>The shared nested-array node table.</summary>
     public readonly ArrayView<int> RowMetadata;
-    /// <summary>The physical element stride in bytes, including padding for Boolean and character elements.</summary>
+    /// <summary>The first child descriptor's integer offset in the shared node table.</summary>
+    public readonly int RowOffset;
+    /// <summary>The shared dimension table storing length, lower bound, and stride triples.</summary>
+    public readonly ArrayView<int> ShapeMetadata;
+    /// <summary>The first dimension's integer offset, or minus one for a legacy flat view.</summary>
+    public readonly int ShapeOffset;
+    /// <summary>The array rank; lists and flat views have rank one.</summary>
+    public readonly int Rank;
+    /// <summary>The invocation-local host reference identity; zero denotes null.</summary>
+    public readonly int Identity;
+    /// <summary>The invocation's deferred error and safe-reference context.</summary>
+    public readonly DeviceExecutionContext Context;
+    /// <summary>One for a read-only collection view; zero for a writable view.</summary>
+    public readonly int IsReadOnly;
+    /// <summary>The physical element stride in bytes.</summary>
     public readonly int ElementSize;
-    /// <summary>The invocation's device write flags.</summary>
+    /// <summary>The invocation's shared write flags.</summary>
     public readonly ArrayView<int> Writes;
-    /// <summary>The write-flag index for this leaf collection, or minus one for a jagged container.</summary>
+    /// <summary>The leaf's shared write-flag index, or minus one for a container.</summary>
     public readonly int DirtyIndex;
 
-    /// <summary>Creates a view of a leaf collection or a jagged container.</summary>
+    /// <summary>Creates a leaf or nested-array view.</summary>
     /// <param name="bytes">The leaf slice or the complete packed device buffer.</param>
-    /// <param name="length">The leaf element count or jagged row count.</param>
-    /// <param name="rows">The rectangular row count, or minus one to use the collection length.</param>
-    /// <param name="columns">The rectangular column count.</param>
-    /// <param name="rowMetadata">The jagged row metadata slice.</param>
-    /// <param name="elementSize">The physical element stride in bytes for flat access and jagged row lookup.</param>
-    /// <param name="writes">The shared device write flags.</param>
-    /// <param name="dirtyIndex">The leaf's write-flag index, or minus one for a jagged container.</param>
+    /// <param name="length">The flat element or child count, or minus one for null.</param>
+    /// <param name="rows">The first dimension's length for legacy views.</param>
+    /// <param name="columns">The second dimension's length for legacy views.</param>
+    /// <param name="rowMetadata">The shared nested-array metadata.</param>
+    /// <param name="elementSize">The physical distance between leaf elements in bytes.</param>
+    /// <param name="writes">The shared write flags.</param>
+    /// <param name="dirtyIndex">The leaf's write-flag index, or minus one for a container.</param>
+    /// <param name="shapeMetadata">The shared dimension metadata.</param>
+    /// <param name="shapeOffset">The first dimension's metadata offset.</param>
+    /// <param name="rank">The array rank.</param>
+    /// <param name="rowOffset">The first child's node metadata offset.</param>
+    /// <param name="identity">The host reference identity.</param>
+    /// <param name="context">The invocation's deferred error context.</param>
+    /// <param name="readOnly">One for a read-only view, otherwise zero.</param>
     public DeviceCollection(ArrayView<byte> bytes, int length, int rows = -1, int columns = 0,
         ArrayView<int> rowMetadata = default, int elementSize = 0,
-        ArrayView<int> writes = default, int dirtyIndex = -1)
+        ArrayView<int> writes = default, int dirtyIndex = -1,
+        ArrayView<int> shapeMetadata = default, int shapeOffset = -1,
+        int rank = 1, int rowOffset = 0, int identity = 0, DeviceExecutionContext context = default, int readOnly = 0)
     {
         Bytes = bytes;
         Length = length;
         Rows = rows < 0 ? length : rows;
         Columns = columns;
         RowMetadata = rowMetadata;
+        RowOffset = rowOffset;
+        ShapeMetadata = shapeMetadata;
+        ShapeOffset = shapeOffset;
+        Rank = rank;
+        Identity = identity;
+        Context = context;
+        IsReadOnly = readOnly;
         ElementSize = elementSize;
         Writes = writes;
         DirtyIndex = dirtyIndex;
     }
 
-    /// <summary>Reads one flat element without marking the collection as written.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="index">The zero-based element index.</param>
-    /// <returns>The element value.</returns>
-    public static T Read<T>(DeviceCollection collection, int index) where T : unmanaged =>
-        collection.Bytes.SubView((long)index * collection.ElementSize, collection.ElementSize).Cast<T>()[0];
+    /// <summary>Reads one flat leaf element without marking it as written.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The leaf view.</param>
+    /// <param name="index">The zero-based flat index.</param>
+    /// <returns>The element.</returns>
+    public static T Read<T>(DeviceCollection collection, int index) where T : unmanaged
+    {
+        if (!ValidIndex(collection, index))
+            return default;
+        return collection.Bytes.SubView((long)index * collection.ElementSize, collection.ElementSize).Cast<T>()[0];
+    }
 
-    /// <summary>Writes one flat element and marks the collection for host copy-back.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="index">The zero-based element index.</param>
+    /// <summary>Writes one flat element and marks the leaf for host copy-back.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The leaf view.</param>
+    /// <param name="index">The zero-based flat index.</param>
     /// <param name="value">The value to store.</param>
     public static void Write<T>(DeviceCollection collection, int index, T value) where T : unmanaged
     {
+        if (!ValidIndex(collection, index))
+            return;
+        if (collection.IsReadOnly != 0)
+        {
+            collection.Context.Fail(5);
+            return;
+        }
         MarkWritten(collection);
         collection.Bytes.SubView((long)index * collection.ElementSize, collection.ElementSize).Cast<T>()[0] = value;
     }
 
-    /// <summary>Returns an element reference and marks its collection as potentially written.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="index">The zero-based element index.</param>
+    /// <summary>Returns a flat element reference and marks the leaf as potentially written.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The leaf view.</param>
+    /// <param name="index">The zero-based flat index.</param>
     /// <returns>A reference to the device element.</returns>
-    /// <remarks>Copy-back is conservative because a scalar helper may modify the returned reference.</remarks>
     public static ref T Address<T>(DeviceCollection collection, int index) where T : unmanaged
     {
-        // A returned element reference may be modified by a scalar helper.
+        if (!ValidIndex(collection, index))
+            return ref collection.Context.ScratchAddress<T>();
+        if (collection.IsReadOnly != 0)
+        {
+            collection.Context.Fail(5);
+            return ref collection.Context.ScratchAddress<T>();
+        }
         MarkWritten(collection);
         return ref collection.Bytes.SubView((long)index * collection.ElementSize, collection.ElementSize).Cast<T>()[0];
     }
 
-    /// <summary>Atomically marks a leaf collection for host copy-back.</summary>
-    /// <param name="collection">The leaf collection whose flag is updated.</param>
+    /// <summary>Returns a checked element reference without marking a read-only access as written.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The leaf view.</param>
+    /// <param name="index">The zero-based flat index.</param>
+    /// <returns>A reference for read-only access.</returns>
+    public static ref T ReadOnlyAddress<T>(DeviceCollection collection, int index) where T : unmanaged
+    {
+        if (!ValidIndex(collection, index))
+            return ref collection.Context.ScratchAddress<T>();
+        return ref collection.Bytes.SubView((long)index * collection.ElementSize, collection.ElementSize).Cast<T>()[0];
+    }
+
+    /// <summary>Checks a flat access and records a deferred error for null or out-of-range references.</summary>
+    /// <param name="collection">The collection reference.</param>
+    /// <param name="index">The zero-based flat index.</param>
+    /// <returns>Whether access is valid.</returns>
+    private static bool ValidIndex(DeviceCollection collection, int index)
+    {
+        if (collection.Identity == 0)
+        {
+            collection.Context.Fail(2);
+            return false;
+        }
+        if ((uint)index >= (uint)collection.Length)
+        {
+            collection.Context.Fail(3);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Checks a dimension query and records invalid or null accesses.</summary>
+    /// <param name="collection">The array reference.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <returns>Whether the query is valid.</returns>
+    private static bool ValidDimension(DeviceCollection collection, int dimension)
+    {
+        if (collection.Identity == 0)
+        {
+            collection.Context.Fail(2);
+            return false;
+        }
+        if ((uint)dimension >= (uint)collection.Rank)
+        {
+            collection.Context.Fail(3);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Attaches the work item's context to a captured collection view.</summary>
+    /// <param name="collection">The captured view.</param>
+    /// <param name="context">The work item's deferred error and scratch context.</param>
+    /// <returns>The view carrying that context.</returns>
+    public static DeviceCollection WithContext(DeviceCollection collection, DeviceExecutionContext context) =>
+        new(collection.Bytes, collection.Length, collection.Rows, collection.Columns,
+            collection.RowMetadata, collection.ElementSize, collection.Writes, collection.DirtyIndex,
+            collection.ShapeMetadata, collection.ShapeOffset, collection.Rank, collection.RowOffset,
+            collection.Identity, context, collection.IsReadOnly);
+
+    /// <summary>Atomically marks a leaf for copy-back.</summary>
+    /// <param name="collection">The leaf view.</param>
     private static void MarkWritten(DeviceCollection collection)
     {
-        // Flags only change from zero to one; a stale zero merely repeats the atomic write.
         if (collection.Writes[collection.DirtyIndex] == 0)
             Atomic.Exchange(ref collection.Writes[collection.DirtyIndex], 1);
     }
 
-    /// <summary>Reads a rectangular array element using row-major addressing.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="row">The zero-based row index.</param>
-    /// <param name="column">The zero-based column index.</param>
-    /// <returns>The element value.</returns>
-    public static T Read2D<T>(DeviceCollection collection, int row, int column) where T : unmanaged =>
-        Read<T>(collection, row * collection.Columns + column);
+    /// <summary>Returns one dimension's contribution to the flat row-major offset.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <param name="index">The index in that dimension's native lower-bound convention.</param>
+    /// <returns>The dimension's contribution in elements.</returns>
+    public static int DimensionOffset(DeviceCollection collection, int dimension, int index)
+    {
+        if (!ValidDimension(collection, dimension))
+            return 0;
+        int length;
+        int relative;
+        int stride;
+        if (collection.ShapeOffset < 0)
+        {
+            length = dimension == 0 ? collection.Rows : collection.Columns;
+            relative = index;
+            stride = dimension == 0 && collection.Columns != 0 ? collection.Columns : 1;
+        }
+        else
+        {
+            int position = collection.ShapeOffset + dimension * 3;
+            length = collection.ShapeMetadata[position];
+            relative = index - collection.ShapeMetadata[position + 1];
+            stride = collection.ShapeMetadata[position + 2];
+        }
+        if ((uint)relative >= (uint)length)
+        {
+            collection.Context.Fail(3);
+            return 0;
+        }
+        return relative * stride;
+    }
 
-    /// <summary>Writes a rectangular array element and marks the array for host copy-back.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="row">The zero-based row index.</param>
-    /// <param name="column">The zero-based column index.</param>
+    /// <summary>Reads a two-dimensional element.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The rectangular view.</param>
+    /// <param name="row">The first index.</param>
+    /// <param name="column">The second index.</param>
+    /// <returns>The element.</returns>
+    public static T Read2D<T>(DeviceCollection collection, int row, int column) where T : unmanaged =>
+        Read<T>(collection, DimensionOffset(collection, 0, row) + DimensionOffset(collection, 1, column));
+
+    /// <summary>Writes a two-dimensional element.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The rectangular view.</param>
+    /// <param name="row">The first index.</param>
+    /// <param name="column">The second index.</param>
     /// <param name="value">The value to store.</param>
     public static void Write2D<T>(DeviceCollection collection, int row, int column, T value) where T : unmanaged =>
-        Write(collection, row * collection.Columns + column, value);
+        Write(collection, DimensionOffset(collection, 0, row) + DimensionOffset(collection, 1, column), value);
 
-    /// <summary>Returns a rectangular element reference and marks the array as potentially written.</summary>
-    /// <typeparam name="T">The supported element type.</typeparam>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="row">The zero-based row index.</param>
-    /// <param name="column">The zero-based column index.</param>
-    /// <returns>A reference to the device element.</returns>
+    /// <summary>Returns a two-dimensional element reference.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The rectangular view.</param>
+    /// <param name="row">The first index.</param>
+    /// <param name="column">The second index.</param>
+    /// <returns>A reference to the element.</returns>
     public static ref T Address2D<T>(DeviceCollection collection, int row, int column) where T : unmanaged =>
-        ref Address<T>(collection, row * collection.Columns + column);
+        ref Address<T>(collection, DimensionOffset(collection, 0, row) + DimensionOffset(collection, 1, column));
 
-    /// <summary>Resolves a jagged row into its leaf view and shared write flag.</summary>
-    /// <param name="collection">The jagged container view.</param>
-    /// <param name="index">The zero-based row index.</param>
-    /// <returns>The row's device view.</returns>
+    /// <summary>Resolves a nested child array, retaining its shape and shared identity.</summary>
+    /// <param name="collection">The nested-array container.</param>
+    /// <param name="index">The zero-based flat child index.</param>
+    /// <returns>The child view, including a null view for a null child.</returns>
     public static DeviceCollection Row(DeviceCollection collection, int index)
     {
-        int position = index * 3;
+        if (!ValidIndex(collection, index))
+            return WithContext(Null(), collection.Context);
+        int position = collection.RowOffset + index * RowDescriptor.Width;
         int offset = collection.RowMetadata[position];
         int length = collection.RowMetadata[position + 1];
         int dirtyIndex = collection.RowMetadata[position + 2];
-        return new(collection.Bytes.SubView((long)offset * collection.ElementSize,
-            (long)length * collection.ElementSize), length, elementSize: collection.ElementSize,
-            writes: collection.Writes, dirtyIndex: dirtyIndex);
+        int shapeOffset = collection.RowMetadata[position + 3];
+        int rank = collection.RowMetadata[position + 4];
+        int identity = collection.RowMetadata[position + 5];
+        if (length < 0)
+            return WithContext(Null(), collection.Context);
+        bool leaf = dirtyIndex >= 0;
+        return new(leaf ? collection.Bytes.SubView((long)offset * collection.ElementSize,
+                (long)length * collection.ElementSize) : collection.Bytes,
+            length, rowMetadata: collection.RowMetadata, elementSize: collection.ElementSize,
+            writes: collection.Writes, dirtyIndex: dirtyIndex,
+            shapeMetadata: collection.ShapeMetadata, shapeOffset: shapeOffset, rank: rank,
+            rowOffset: leaf ? 0 : offset, identity: identity, context: collection.Context, readOnly: collection.IsReadOnly);
     }
 
-    /// <summary>Returns a collection's length for translated array and list access.</summary>
-    /// <param name="collection">The device collection view.</param>
-    /// <returns>The element count, or jagged row count.</returns>
-    public static int Count(DeviceCollection collection) => collection.Length;
+    /// <summary>Creates the null collection reference representation.</summary>
+    /// <returns>A null view.</returns>
+    public static DeviceCollection Null() => new(default, -1);
 
-    /// <summary>Returns a rectangular array dimension's length.</summary>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="dimension">Zero for rows or one for columns.</param>
-    /// <returns>The selected dimension's length.</returns>
-    public static int GetLength(DeviceCollection collection, int dimension) =>
-        dimension == 0 ? collection.Rows : collection.Columns;
+    /// <summary>Checks a translated collection reference for null.</summary>
+    /// <param name="collection">The collection reference.</param>
+    /// <returns>Whether the reference is null.</returns>
+    public static bool IsNull(DeviceCollection collection) => collection.Identity == 0;
 
-    /// <summary>Returns the collection length as a 64-bit value.</summary>
-    /// <param name="collection">The device collection view.</param>
-    /// <returns>The element count, or jagged row count.</returns>
-    public static long LongCount(DeviceCollection collection) => collection.Length;
+    /// <summary>Compares translated collection reference identities.</summary>
+    /// <param name="left">The first reference.</param>
+    /// <param name="right">The second reference.</param>
+    /// <returns>Whether both references denote the same host object or are null.</returns>
+    public static bool Same(DeviceCollection left, DeviceCollection right) => left.Identity == right.Identity;
 
-    /// <summary>Returns a rectangular array dimension's length as a 64-bit value.</summary>
-    /// <param name="collection">The device collection view.</param>
-    /// <param name="dimension">Zero for rows or one for columns.</param>
-    /// <returns>The selected dimension's length.</returns>
-    public static long GetLongLength(DeviceCollection collection, int dimension) =>
-        GetLength(collection, dimension);
+    /// <summary>Returns the flat element or child count.</summary>
+    /// <param name="collection">The collection view.</param>
+    /// <returns>The count.</returns>
+    public static int Count(DeviceCollection collection)
+    {
+        if (collection.Identity != 0)
+            return collection.Length;
+        collection.Context.Fail(2);
+        return 0;
+    }
+
+    /// <summary>Returns an array dimension's length.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <returns>The dimension length.</returns>
+    public static int GetLength(DeviceCollection collection, int dimension)
+    {
+        if (!ValidDimension(collection, dimension))
+            return 0;
+        return collection.ShapeOffset < 0 ? dimension == 0 ? collection.Rows : collection.Columns
+            : collection.ShapeMetadata[collection.ShapeOffset + dimension * 3];
+    }
+
+    /// <summary>Returns an array dimension's lower bound.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <returns>The lower bound.</returns>
+    public static int GetLowerBound(DeviceCollection collection, int dimension)
+    {
+        if (!ValidDimension(collection, dimension))
+            return 0;
+        return collection.ShapeOffset < 0 ? 0 : collection.ShapeMetadata[collection.ShapeOffset + dimension * 3 + 1];
+    }
+
+    /// <summary>Returns an array dimension's inclusive upper bound.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <returns>The upper bound.</returns>
+    public static int GetUpperBound(DeviceCollection collection, int dimension) =>
+        GetLowerBound(collection, dimension) + GetLength(collection, dimension) - 1;
+
+    /// <summary>Returns the array rank.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <returns>The rank.</returns>
+    public static int GetRank(DeviceCollection collection)
+    {
+        if (collection.Identity != 0)
+            return collection.Rank;
+        collection.Context.Fail(2);
+        return 0;
+    }
+
+    /// <summary>Returns the flat count as a 64-bit value.</summary>
+    /// <param name="collection">The collection view.</param>
+    /// <returns>The count.</returns>
+    public static long LongCount(DeviceCollection collection) => Count(collection);
+
+    /// <summary>Returns a dimension length as a 64-bit value.</summary>
+    /// <param name="collection">The array view.</param>
+    /// <param name="dimension">The zero-based dimension number.</param>
+    /// <returns>The dimension length.</returns>
+    public static long GetLongLength(DeviceCollection collection, int dimension) => GetLength(collection, dimension);
 }
