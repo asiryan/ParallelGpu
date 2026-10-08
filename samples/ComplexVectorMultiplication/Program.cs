@@ -3,7 +3,7 @@ using System.Numerics;
 using ComplexVectorMultiplication;
 using ParallelGpu;
 
-// Configure the sample here.
+// Each vector occupies 512 MiB: 33,554,432 values of two doubles each.
 const int Length = 2 << 24;
 
 Complex[] a = Vectors.Random(Length, seed: 12345);
@@ -18,17 +18,15 @@ using var gpu = new Gpu(new GpuOptions
 Console.WriteLine($"A: {Length} complex values, B: {Length} complex values");
 Console.WriteLine("Operation: sum(a[i] * b[i])");
 
-// Warm up both methods; exclude the initial GPU kernel compilation from timing.
+// Exclude initial CPU JIT and accelerator kernel compilation from timing.
 VectorProduct.MultiplyOnCpu(a, b);
 VectorProduct.MultiplyOnGpu(gpu, a, b);
 
-// CPU
 var timer = Stopwatch.StartNew();
 Complex cpuResult = VectorProduct.MultiplyOnCpu(a, b);
 timer.Stop();
 Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
-// GPU
 Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
 
 timer.Restart();

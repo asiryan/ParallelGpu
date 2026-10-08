@@ -58,11 +58,11 @@ internal sealed class LambdaKernel
     /// <param name="start">The inclusive lower bound of the loop range.</param>
     /// <param name="count">The positive number of iterations to launch.</param>
     /// <param name="expectedElement">The required collection element type, or null for mixed types.</param>
-    /// <exception cref="ArgumentException">A capture is null or has an unexpected collection element type.</exception>
+    /// <exception cref="ArgumentException">An intermediate capture object is null or a collection has an unexpected element type.</exception>
     /// <exception cref="NotSupportedException">A captured runtime collection is unsupported.</exception>
     internal void Execute(Gpu gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
-        // Validate every capture before allocating memory or launching the kernel.
+        // Validate collection types and native view ownership before device allocation.
         var values = captures.Select(capture => capture.Read(body.Target)).ToArray();
         for (int i = 0; i < captures.Length; i++)
         {

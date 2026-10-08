@@ -39,7 +39,7 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using the shared default GPU executor.</summary>
-    /// <typeparam name="T">The element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
+    /// <typeparam name="T">The ultimate element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
@@ -82,7 +82,7 @@ public static class GpuParallel
     }
 
     /// <summary>Executes a typed loop using an executor created from the supplied device options.</summary>
-    /// <typeparam name="T">The element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
+    /// <typeparam name="T">The ultimate element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>

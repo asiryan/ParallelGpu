@@ -11,9 +11,9 @@ internal readonly struct DeviceCollection
     public readonly ArrayView<byte> Bytes;
     /// <summary>The flat element or child count; minus one denotes a null reference.</summary>
     public readonly int Length;
-    /// <summary>The first dimension's length, retained for legacy flat views.</summary>
+    /// <summary>The first dimension's length for views without shape metadata.</summary>
     public readonly int Rows;
-    /// <summary>The second dimension's length, retained for legacy flat views.</summary>
+    /// <summary>The second dimension's length for views without shape metadata.</summary>
     public readonly int Columns;
     /// <summary>The shared nested-array node table.</summary>
     public readonly ArrayView<int> RowMetadata;
@@ -21,7 +21,7 @@ internal readonly struct DeviceCollection
     public readonly int RowOffset;
     /// <summary>The shared dimension table storing length, lower bound, and stride triples.</summary>
     public readonly ArrayView<int> ShapeMetadata;
-    /// <summary>The first dimension's integer offset, or minus one for a legacy flat view.</summary>
+    /// <summary>The dimension-table offset, or minus one when Rows and Columns hold the shape.</summary>
     public readonly int ShapeOffset;
     /// <summary>The array rank; lists and flat views have rank one.</summary>
     public readonly int Rank;
@@ -33,7 +33,7 @@ internal readonly struct DeviceCollection
     public readonly int IsReadOnly;
     /// <summary>The deferred exception code for an invalid flat index.</summary>
     public readonly int IndexErrorCode;
-    /// <summary>The physical element stride in bytes.</summary>
+    /// <summary>The physical element stride in bytes; zero also marks a null-backed segment.</summary>
     public readonly int ElementSize;
     /// <summary>The invocation's shared write flags.</summary>
     public readonly ArrayView<int> Writes;
@@ -43,8 +43,8 @@ internal readonly struct DeviceCollection
     /// <summary>Creates a leaf or nested-array view.</summary>
     /// <param name="bytes">The leaf slice or the complete packed device buffer.</param>
     /// <param name="length">The flat element or child count, or minus one for null.</param>
-    /// <param name="rows">The first dimension's length for legacy views.</param>
-    /// <param name="columns">The second dimension's length for legacy views.</param>
+    /// <param name="rows">The first dimension's length for views without shape metadata.</param>
+    /// <param name="columns">The second dimension's length for views without shape metadata.</param>
     /// <param name="rowMetadata">The shared nested-array metadata.</param>
     /// <param name="elementSize">The physical distance between leaf elements in bytes.</param>
     /// <param name="writes">The shared write flags.</param>

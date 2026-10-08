@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace ParallelGpu;
 
 /// <summary>Registers host-only snapshots for custom indexed collections used in ordinary GPU loops.</summary>
-/// <remarks>Registration must precede loop compilation. Each collection type can be registered once.
+/// <remarks>Register before GPU compilation first inspects the type. Each type can be registered once.
 /// GPU bodies can use its integer indexer and Count or Length property; adapter callbacks run on the host.</remarks>
 public static class GpuCollectionAdapters
 {
@@ -20,7 +20,7 @@ public static class GpuCollectionAdapters
     /// <param name="capture">The host callback that exposes shared backing storage or stages a snapshot.</param>
     /// <exception cref="ArgumentNullException">The callback is null.</exception>
     /// <exception cref="ArgumentException">The collection type has no matching integer indexer.</exception>
-    /// <exception cref="InvalidOperationException">The type is already registered or is a built-in collection.</exception>
+    /// <exception cref="InvalidOperationException">The type is built-in, already registered, or already inspected for compilation.</exception>
     /// <exception cref="NotSupportedException">The element type is unsupported.</exception>
     public static void Register<TCollection, T>(Func<TCollection, GpuCollectionSnapshot<T>> capture)
     {
@@ -132,6 +132,7 @@ public static class GpuCollectionAdapters
     {
         if (MemoryMarshal.TryGetArray(memory, out ArraySegment<T> segment))
             return new(segment.Array ?? Array.Empty<T>(), segment.Offset, segment.Count, readOnly);
+        // Snapshot the full owner once so overlapping slices share storage and a commit.
         if (MemoryMarshal.TryGetMemoryManager<T, MemoryManager<T>>(memory, out var manager, out int start, out int length))
         {
             var storage = manager!.GetSpan();

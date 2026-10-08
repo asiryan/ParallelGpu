@@ -25,7 +25,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     private readonly Dictionary<Type, CollectionBatch> batches = new();
     /// <summary>Row descriptors packed with offsets, lengths, write flags, shape offsets, ranks, and identities.</summary>
     private readonly List<int> rows = new();
-    /// <summary>Dimension triples shared by every registered array and list.</summary>
+    /// <summary>Dimension triples for array shapes that cannot use the inline flat descriptor.</summary>
     private readonly List<int> shapes = new();
     /// <summary>The shared device dimension table.</summary>
     private GpuBuffer<int>? shapeBuffer;
@@ -33,7 +33,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     private int nextIdentity = 1;
     /// <summary>Gets or sets the invocation context before uploading collection views.</summary>
     internal DeviceExecutionContext Context { get; set; }
-    /// <summary>Gets the largest physical element size for safe per-thread error references.</summary>
+    /// <summary>Gets the largest physical element size among registered batches.</summary>
     internal int MaximumElementSize { get; private set; } = 1;
     /// <summary>The shared device row table, allocated only when row metadata is present.</summary>
     private GpuBuffer<int>? rowBuffer;
@@ -42,14 +42,14 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>The number of unique leaf collections and reserved write flags.</summary>
     private int collectionCount;
 
-    /// <summary>Gets the packed row table containing element offsets, lengths, and write-flag indices.</summary>
+    /// <summary>Gets the packed nested-array child descriptors.</summary>
     internal ArrayView<int> Rows => rowBuffer?.View ?? default;
     /// <summary>Gets the dimension table storing length, lower bound, and stride triples.</summary>
     internal ArrayView<int> Shapes => shapeBuffer?.View ?? default;
     /// <summary>Gets the write flags used to select collections for host copy-back.</summary>
     internal ArrayView<int> Writes => writeBuffer?.View ?? default;
 
-    /// <summary>Registers a host collection using its runtime supported element type.</summary>
+    /// <summary>Registers a host collection using the supplied element type.</summary>
     /// <param name="source">The host collection to register.</param>
     /// <param name="elementType">The supported element type.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
@@ -121,7 +121,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     internal int NextCollection() => collectionCount++;
 
     /// <summary>Appends row descriptors to the shared packed row table.</summary>
-    /// <param name="descriptors">The row offsets, lengths, and write-flag indices to append.</param>
+    /// <param name="descriptors">The child descriptors to append.</param>
     /// <returns>The integer offset of the first appended descriptor in the table.</returns>
     internal int AddRows(RowDescriptor[] descriptors)
     {
@@ -138,7 +138,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
         return offset;
     }
 
-    /// <summary>Appends the row-major shape of an array, retaining its native lower bounds.</summary>
+    /// <summary>Registers an array's row-major shape while preserving its native lower bounds.</summary>
     /// <param name="array">The host array.</param>
     /// <returns>The first dimension's integer offset, or minus one for an inline zero-based flat shape.</returns>
     internal int AddShape(Array array)
@@ -172,7 +172,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <remarks>Complete collection registration before calling this method.</remarks>
     internal void Upload()
     {
-        // Zero-filled flags leave read-only captures on the device; writes select the slices to download.
+        // Only leaves marked as written, including writable ref accesses, need copyback.
         writeBuffer = gpu.Allocate<int>(collectionCount);
         if (shapes.Count > 0)
             shapeBuffer = gpu.Upload(shapes.ToArray());
@@ -183,7 +183,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     }
 
     /// <summary>Reads write flags and copies affected collection slices into their original host objects.</summary>
-    /// <remarks>Device execution must have completed before this method is called.</remarks>
+    /// <remarks>Validate deferred errors before calling this after device execution.</remarks>
     internal void CopyBack()
     {
         int[] written = writeBuffer!.ToArray();

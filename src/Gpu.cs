@@ -145,7 +145,8 @@ public sealed partial class Gpu : IDisposable
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="kernel">The operation and its device-compatible state.</param>
-    /// <remarks>Empty and reversed ranges do nothing. Iterations are unordered and must be independent.</remarks>
+    /// <remarks>Empty and reversed ranges do nothing. Iterations are unordered;
+    /// shared writes require device synchronization or atomics.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
     /// <exception cref="ArgumentException">The kernel type is not publicly visible.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
@@ -267,7 +268,7 @@ public sealed partial class Gpu : IDisposable
     /// <param name="buffer">The buffer that has released its device allocation.</param>
     internal void Release(IDisposable buffer) => buffers.Remove(buffer);
 
-    /// <summary>Rejects types that cannot be used by generated ILGPU kernel launchers.</summary>
+    /// <summary>Rejects types that are not publicly visible to generated ILGPU kernel launchers.</summary>
     /// <param name="type">The kernel or element type to validate.</param>
     private static void ValidateVisible(Type type)
     {
@@ -312,7 +313,7 @@ public sealed partial class Gpu : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options.DeviceIndex), "Device index is unavailable.");
 
         var failures = new List<Exception>();
-        // Default automatic selection can try all GPUs; an explicit device index selects one candidate.
+        // Auto with index zero tries all GPUs; other selections try one device.
         var candidates = options.Backend == GpuBackend.Auto && options.DeviceIndex == 0
             ? devices
             : devices.Skip(options.DeviceIndex).Take(1);

@@ -57,8 +57,8 @@ internal sealed class CollectionBatch<T> : CollectionBatch
             valueBuffer!.Upload(gpu, collections[0].Snapshot);
             return;
         }
-        // Large collections can be copied directly into their slices, avoiding a second
-        // gigabyte-sized host allocation. Keep small collections packed to batch transfers.
+        // Direct slice uploads avoid a second full host buffer for large batches.
+        // Pack small batches to share one transfer.
         if ((long)length * ElementSize >= (long)collections.Count * MinimumDirectTransferBytes)
         {
             valueBuffer!.Allocate(gpu, length);

@@ -2,7 +2,7 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Checks integer operations that can otherwise terminate CPU device workers.</summary>
+/// <summary>Provides guarded integer arithmetic and floating-point Min/Max with CLR NaN behavior.</summary>
 internal static class DeviceArithmetic
 {
     internal static bool IsDivision(OpCode code) => code == OpCodes.Div || code == OpCodes.Div_Un ||
@@ -10,7 +10,7 @@ internal static class DeviceArithmetic
 
     internal static bool IsNarrowingConversion(OpCode code) => code == OpCodes.Conv_I1 || code == OpCodes.Conv_U1 ||
         code == OpCodes.Conv_I2 || code == OpCodes.Conv_U2;
-    /// <summary>Gets the CIL integer stack width, or zero for floating-point operations.</summary>
+    /// <summary>Gets the CIL integer stack width; zero denotes floating point and minus one an unsupported type.</summary>
     internal static int IntegerWidth(Type? type)
     {
         if (type is null)

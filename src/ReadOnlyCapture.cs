@@ -3,7 +3,7 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Prevents a captured value's address from being used to mutate host state or escape the loop.</summary>
+/// <summary>Validates read-only use of captured-value addresses in loop IL.</summary>
 internal static class ReadOnlyCapture
 {
     /// <summary>Checks the consumption of an address loaded from a closure value.</summary>
@@ -120,10 +120,10 @@ internal static class ReadOnlyCapture
     private static int Count(StackBehaviour behavior) => behavior is StackBehaviour.Pop0 or StackBehaviour.Push0
         ? 0 : behavior.ToString().Split('_').Length;
 
-    /// <summary>Recognizes readonly members and simple instance helpers that only read value fields.</summary>
+    /// <summary>Recognizes readonly members and helpers with no detected receiver writes.</summary>
     /// <param name="method">The instance method consuming the capture address.</param>
     /// <param name="visited">The inspected method call graph.</param>
-    /// <returns>True when the method cannot mutate the receiver.</returns>
+    /// <returns>True for members marked readonly or passing the receiver-mutation checks.</returns>
     private static bool IsReadOnly(MethodInfo method, HashSet<MethodInfo> visited)
     {
         const string attribute = "System.Runtime.CompilerServices.IsReadOnlyAttribute";

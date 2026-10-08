@@ -6,7 +6,7 @@ namespace ParallelGpu;
 /// <remarks>Transfer traverses references iteratively and preserves object identity, null, sharing,
 /// and cycles. Download creates an immutable value snapshot. CopyToHost explicitly applies changes
 /// to original objects and creates host instances for new records. Adapter callbacks run on the host.
-/// Failed device allocation or invalid access rejects the graph before adapter write callbacks run;
+/// Capacity exhaustion or invalid device access rejects the graph before adapter write callbacks run;
 /// dispose and upload a new graph after such a failure. Callback exceptions can leave partial host edits.</remarks>
 public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
     where TObject : class where TRecord : unmanaged
@@ -112,7 +112,7 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
 
     /// <summary>Downloads validated values and topology without modifying any host objects.</summary>
     /// <returns>An immutable graph snapshot that remains usable after graph disposal.</returns>
-    /// <exception cref="InvalidOperationException">Device allocation overflowed or an invalid access occurred.</exception>
+    /// <exception cref="InvalidOperationException">Record or reference capacity was exhausted, or graph access was invalid.</exception>
     /// <exception cref="ObjectDisposedException">The graph or executor has been disposed.</exception>
     public GpuObjectGraphSnapshot<TRecord> Download()
     {
@@ -232,10 +232,10 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
 /// <summary>Allocates process-wide identities for graphs and owned device views.</summary>
 internal static class GpuDeviceIdentity
 {
-    /// <summary>The most recently assigned graph identity.</summary>
+    /// <summary>The most recently assigned device identity.</summary>
     private static int next;
 
-    /// <summary>Allocates a unique positive graph identity.</summary>
+    /// <summary>Allocates a unique positive identity for a graph or owned view.</summary>
     /// <returns>The new identity.</returns>
     internal static int Allocate()
     {

@@ -26,7 +26,7 @@ internal sealed class ScalarMethodTranslator
         collections = new CollectionMethodTranslator(helpers);
     }
 
-    /// <summary>Maps full-width character values and device-compatible structures, including references.</summary>
+    /// <summary>Maps supported values, collections, and by-reference types to their device representations.</summary>
     /// <param name="type">The original value or reference type.</param>
     /// <returns>The corresponding device-compatible type.</returns>
     internal static Type MapType(Type type)
@@ -63,7 +63,7 @@ internal sealed class ScalarMethodTranslator
     /// <summary>Gets a method using the device representations of its values.</summary>
     /// <param name="method">The original method.</param>
     /// <returns>A generated helper or the unchanged method when translation is unnecessary.</returns>
-    /// <exception cref="NotSupportedException">A translated helper uses unsupported managed IL.</exception>
+    /// <exception cref="NotSupportedException">The helper uses unsupported instructions or framework operations.</exception>
     internal MethodInfo Translate(MethodInfo method)
     {
         if (methods.TryGetValue(method, out var existing))
@@ -80,7 +80,7 @@ internal sealed class ScalarMethodTranslator
         return method;
     }
 
-    /// <summary>Emits a compatible value constructor, translating it when its representation changes.</summary>
+    /// <summary>Emits a compatible value constructor, translating values and numeric operations when required.</summary>
     /// <param name="il">The destination IL generator.</param>
     /// <param name="code">The original call or construction instruction.</param>
     /// <param name="constructor">The value constructor.</param>

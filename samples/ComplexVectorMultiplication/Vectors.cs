@@ -9,6 +9,7 @@ public static class Vectors
     /// <param name="length">The nonnegative number of vector elements.</param>
     /// <param name="seed">The random generator seed.</param>
     /// <returns>A vector containing the generated values.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The length is negative.</exception>
     public static Complex[] Random(int length, int seed)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
@@ -19,9 +20,9 @@ public static class Vectors
         return values;
     }
 
-    /// <summary>Validates both components with an absolute and relative tolerance.</summary>
-    /// <param name="expected">The CPU reference result.</param>
-    /// <param name="actual">The GPU result.</param>
+    /// <summary>Checks each component against a tolerance of 1e-10 + 1e-10 * abs(reference component).</summary>
+    /// <param name="expected">The reference result.</param>
+    /// <param name="actual">The result to compare.</param>
     /// <returns>The maximum absolute component error.</returns>
     /// <exception cref="InvalidOperationException">A component is nonfinite or differs beyond tolerance.</exception>
     public static double CheckEqual(Complex expected, Complex actual)

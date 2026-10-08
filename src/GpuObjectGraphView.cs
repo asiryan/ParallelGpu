@@ -5,7 +5,7 @@ namespace ParallelGpu;
 /// <summary>A device view over bounded object records, outgoing references, and graph roots.</summary>
 /// <typeparam name="TRecord">The unmanaged, ILGPU-supported payload type.</typeparam>
 /// <remarks>Null, shared references, and cycles use stable graph-specific handles. Existing records
-/// and links may be edited; new records reserve fixed-size storage atomically. New objects must be
+/// and links may be edited; concurrent creation reserves distinct records and reference ranges. New objects must be
 /// read only in a later kernel, after their creating kernel has completed. Concurrent changes to
 /// the same payload, reference slot, or root still require synchronization by the caller.
 /// Invalid references and capacity exhaustion are recorded and rejected on host download. Lambda
@@ -141,11 +141,13 @@ public readonly struct GpuObjectGraphView<TRecord> : IDeviceNativeView where TRe
     public GpuObjectHandle Create(TRecord value, int referenceCount) =>
         TryCreate(value, referenceCount, out var handle) ? handle : default;
 
-    /// <summary>Atomically reserves a new record and its fixed outgoing-reference slots.</summary>
+    /// <summary>Attempts to reserve and initialize a record with fixed outgoing-reference slots.</summary>
     /// <param name="value">The new payload.</param>
     /// <param name="referenceCount">The nonnegative number of outgoing references.</param>
     /// <param name="handle">The newly allocated reference, or null when allocation fails.</param>
     /// <returns>True when the complete record was initialized; otherwise false.</returns>
+    /// <remarks>Record and reference reservations use separate atomics. On failure, reservations are
+    /// not rolled back and host download rejects the graph.</remarks>
     public bool TryCreate(TRecord value, int referenceCount, out GpuObjectHandle handle)
     {
         handle = default;

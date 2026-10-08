@@ -2,7 +2,7 @@ using System.Reflection;
 
 namespace ParallelGpu;
 
-/// <summary>Defines the framework math boundary supported by ILGPU 1.5.3 or explicit lowering.</summary>
+/// <summary>Selects framework math methods backed by native instructions or explicit lowering.</summary>
 // Intrinsic signatures follow RemappedIntrinsics.Generated.tt at ILGPU commit
 // 2efd942cf020da83c32278a6666d57c1d8505077 (the pinned 1.5.3 package).
 internal static class DeviceNumericMethods

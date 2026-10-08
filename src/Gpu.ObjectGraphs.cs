@@ -10,9 +10,9 @@ public sealed partial class Gpu
     /// <param name="capacity">The maximum record count, or -1 to use the existing object count.</param>
     /// <param name="referenceCapacity">The maximum outgoing-reference count, or -1 to use the existing count.</param>
     /// <returns>A reusable graph whose device view preserves null, shared references, and cycles.</returns>
-    /// <remarks>Capacity is allocated on the host. Device creation reserves records and reference slots
-    /// atomically; it does not allocate managed class instances. Host classes are reconstructed only
-    /// by the adapter when CopyToHost is explicitly called. Graph traversal uses object reference identity.</remarks>
+    /// <remarks>Capacity is allocated on the host. Device creation uses separate atomic reservations for
+    /// record and reference pools. The adapter creates host objects only when CopyToHost is called.
+    /// Graph traversal preserves reference identity.</remarks>
     /// <exception cref="ArgumentNullException">The roots or adapter is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A capacity is below -1 or too small for the existing graph.</exception>
     /// <exception cref="ArgumentException">The record type is not publicly visible.</exception>

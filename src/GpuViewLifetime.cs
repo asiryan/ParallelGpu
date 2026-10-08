@@ -29,7 +29,7 @@ internal sealed class GpuViewLifetime : IDisposable
         leases.TryAdd(Id, new(this));
     }
 
-    /// <summary>Removes an abandoned weak registration when its executor is collected.</summary>
+    /// <summary>Removes the weak registration when an abandoned lifetime is collected.</summary>
     ~GpuViewLifetime() => leases.TryRemove(Id, out _);
 
     /// <summary>Gets the unique identity passed to device views.</summary>

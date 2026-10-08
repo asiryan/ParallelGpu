@@ -6,10 +6,10 @@ namespace ComplexVectorMultiplication;
 /// <summary>Computes sum(a[i] * b[i]) without conjugating either vector.</summary>
 public static class VectorProduct
 {
-    /// <summary>The maximum number of products combined by each iteration on either backend.</summary>
+    /// <summary>The maximum number of values combined by one multiplication or reduction iteration.</summary>
     internal const int BatchSize = 256;
 
-    /// <summary>Neighboring iterations read neighboring elements within each group of batches.</summary>
+    /// <summary>The maximum number of interleaved batches in one input group.</summary>
     private const int BatchLanes = 32;
 
     /// <summary>Combines multiplication and the first reduction pass with automatic array transfers.</summary>
@@ -17,6 +17,8 @@ public static class VectorProduct
     /// <param name="a">The left vector, which remains unchanged.</param>
     /// <param name="b">The right vector, which remains unchanged.</param>
     /// <returns>The complex sum of the element products, or zero for empty vectors.</returns>
+    /// <exception cref="ArgumentNullException">The executor or either vector is null.</exception>
+    /// <exception cref="ArgumentException">The vector lengths differ.</exception>
     public static Complex MultiplyOnGpu(Gpu gpu, Complex[] a, Complex[] b)
     {
         ArgumentNullException.ThrowIfNull(gpu);
@@ -44,6 +46,8 @@ public static class VectorProduct
     /// <param name="a">The left vector, which remains unchanged.</param>
     /// <param name="b">The right vector, which remains unchanged.</param>
     /// <returns>The complex sum of the element products, or zero for empty vectors.</returns>
+    /// <exception cref="ArgumentNullException">Either vector is null.</exception>
+    /// <exception cref="ArgumentException">The vector lengths differ.</exception>
     public static Complex MultiplyOnCpu(Complex[] a, Complex[] b)
     {
         int length = Vectors.ProductLength(a, b);
@@ -53,7 +57,7 @@ public static class VectorProduct
         var sums = new Complex[BatchCount(length)];
         Parallel.For(0, sums.Length, index =>
         {
-            // Interleave each group so neighboring GPU threads load neighboring elements.
+            // Preserve the GPU's grouping and summation order for comparison.
             int group = index / BatchLanes * BatchLanes;
             int stride = Math.Min(BatchLanes, sums.Length - group);
             int start = group * BatchSize + index - group;

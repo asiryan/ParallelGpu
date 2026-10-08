@@ -10,8 +10,8 @@ internal sealed record LoopCapture(FieldInfo[] Path, FieldInfo Destination, Type
 {
     /// <summary>Reads the current captured value by following the original field path.</summary>
     /// <param name="target">The current delegate closure, or null for a static body.</param>
-    /// <returns>The non-null captured value.</returns>
-    /// <exception cref="ArgumentException">A captured object or collection is null.</exception>
+    /// <returns>The captured value, including null for a nullable value or collection.</returns>
+    /// <exception cref="ArgumentException">An intermediate capture object is null or a required value is missing.</exception>
     internal object? Read(object? target)
     {
         object? value = target;

@@ -2,7 +2,7 @@ using ILGPU;
 
 namespace ParallelGpu;
 
-/// <summary>Carries deferred errors so failed loops never copy partial results to host collections.</summary>
+/// <summary>Carries device errors checked before automatic collection copy-back.</summary>
 internal readonly struct DeviceExecutionContext
 {
     /// <summary>The first deferred error code, initialized to zero for each invocation.</summary>

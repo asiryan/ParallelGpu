@@ -1,6 +1,6 @@
 namespace ParallelGpu;
 
-/// <summary>Recognizes explicit device views whose pointer fields are owned by GPU buffers.</summary>
+/// <summary>Recognizes explicit device views and the device execution context.</summary>
 internal static class DeviceNativeTypes
 {
     internal static bool IsSupported(Type type) => type == typeof(DeviceExecutionContext) ||

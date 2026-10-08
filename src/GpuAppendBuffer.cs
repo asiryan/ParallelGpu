@@ -6,7 +6,8 @@ namespace ParallelGpu;
 /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
 /// <remarks>Concurrent appends reserve distinct slots atomically. Their order is unspecified.
 /// Read the output on the host only after the kernel has completed. Lambda captures validate ownership
-/// and lifetime before launching. Views used in explicit value kernels must not outlive their owner.</remarks>
+/// and lifetime before launching. Explicit value kernels must use views with their owning executor
+/// and within their owner's lifetime.</remarks>
 public readonly struct GpuAppendView<T> : IDeviceNativeView where T : unmanaged
 {
     /// <summary>The host-validated allocation lifetime.</summary>
@@ -49,9 +50,8 @@ public readonly struct GpuAppendView<T> : IDeviceNativeView where T : unmanaged
     /// <param name="value">The value to append.</param>
     /// <param name="index">The zero-based reserved slot, or -1 when capacity is exhausted.</param>
     /// <returns>True if the value was appended; otherwise false.</returns>
-    /// <remarks>The slot can be used as an index in a separately preallocated object graph.
-    /// Reservation is not publication: another device thread must not read an appended value before
-    /// a suitable synchronization boundary.</remarks>
+    /// <remarks>Reservation does not publish the value. Other device threads need a synchronization
+    /// boundary before reading the appended value.</remarks>
     public bool TryAdd(T value, out int index)
     {
         int capacity = values.IntLength;
