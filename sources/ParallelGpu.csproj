@@ -17,7 +17,7 @@
     <PackageProjectUrl>https://github.com/asiryan/ParallelGpu</PackageProjectUrl>
     <RepositoryUrl>https://github.com/asiryan/ParallelGpu</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>gpu;parallel;cuda;opencl;ilgpu;compute;lambda;arrays;collections</PackageTags>
+    <PackageTags>gpu parallel cuda opencl ilgpu compute lambda arrays collections</PackageTags>
     <NeutralLanguage>en</NeutralLanguage>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
