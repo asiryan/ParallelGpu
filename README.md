@@ -138,9 +138,8 @@ Capacity is fixed. `TryAdd(value, out index)` reports success and the reserved s
 
 ## Collection adapters and object graphs
 
-**Custom indexed collections:** register `GpuCollectionAdapters.Register<TCollection,T>` before compilation and supply a `GpuCollectionSnapshot<T>`. A snapshot describes the full buffer, slice, read-only status, shared identity, and optional host commit. Shared identities preserve aliases and reuse one commit per invocation. See [adapter and memory-manager examples](tests/CollectionAdapterTests.cs).
-
-**Classes, shared objects, and cycles:** use `UploadObjectGraph<TObject,TRecord>` with `IGpuObjectGraphAdapter<TObject,TRecord>`. The host class becomes a public unmanaged record plus explicit links. Reserve record/reference capacity for device-side creation. `Download()` returns records; `CopyToHost()` updates existing objects and reconstructs new ones. See [object-graph examples](tests/ObjectGraphTests.cs).
+- **Custom indexed collections:** register `GpuCollectionAdapters.Register<TCollection,T>` before compilation and supply a `GpuCollectionSnapshot<T>`. A snapshot describes the full buffer, slice, read-only status, shared identity, and optional host commit. Shared identities preserve aliases and reuse one commit per invocation. See [adapter and memory-manager examples](tests/CollectionAdapterTests.cs).
+- **Classes, shared objects, and cycles:** use `UploadObjectGraph<TObject,TRecord>` with `IGpuObjectGraphAdapter<TObject,TRecord>`. The host class becomes a public unmanaged record plus explicit links. Reserve record/reference capacity for device-side creation. `Download()` returns records; `CopyToHost()` updates existing objects and reconstructs new ones. See [object-graph examples](tests/ObjectGraphTests.cs).
 
 Adapters run on the host; callback failures can leave partial host changes. Graph roots and links may change, but capacities and each record's reference count are fixed. Newly created records become readable by other iterations in a later kernel. Graph handles belong to their graph. Graph errors make downloads fail; dispose the failed graph and upload a new one. Download append/graph results explicitly to validate their error flags.
 
