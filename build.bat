@@ -1,0 +1,1 @@
+dotnet build sources/ParallelGpu.csproj -c Release
