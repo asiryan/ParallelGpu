@@ -1,6 +1,6 @@
 # ParallelGpu
 
-ParallelGpu runs synchronous C# parallel loops on CUDA or OpenCL through ILGPU. Write a lambda over captured collections; the library compiles it for the selected device, transfers the data, and copies results back before the call returns.
+Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write a lambda over captured collections; the library compiles it for the selected device, transfers the data, and copies results back before the call returns.
 
 The library targets .NET Standard 2.1 and uses ILGPU 1.5.3.
 
@@ -71,4 +71,4 @@ See the [ParallelGpu repository](https://github.com/asiryan/ParallelGpu) for the
 
 ## License
 
-ParallelGpu is licensed under the [MIT License](https://github.com/asiryan/ParallelGpu/blob/main/LICENSE).
+Licensed under MIT.
