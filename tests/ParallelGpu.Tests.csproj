@@ -12,7 +12,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <ProjectReference Include="../src/ParallelGpu.csproj" />
+    <ProjectReference Include="../sources/ParallelGpu.csproj" />
     <ProjectReference Include="../samples/FloatMatrixMultiplication/FloatMatrixMultiplication.csproj" />
     <ProjectReference Include="../samples/ComplexVectorMultiplication/ComplexVectorMultiplication.csproj" />
   </ItemGroup>

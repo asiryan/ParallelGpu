@@ -2,7 +2,7 @@
 
 Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write an ordinary lambda; the library compiles it, transfers captured collections, and copies results back before returning.
 
-The library targets .NET Standard 2.1. Build the solution and samples with the .NET 8 SDK. Reference `src/ParallelGpu.csproj` from your application.
+The library targets .NET Standard 2.1. Build the solution and samples with the .NET 8 SDK. Reference `sources/ParallelGpu.csproj` from your application.
 
 ## Quick start
 
