@@ -183,4 +183,4 @@ Tests default to the CPU backend. Set `PARALLEL_GPU_TEST_BACKEND` to `Cpu`, `Cud
 
 ## License
 
-MIT
+**MIT**
