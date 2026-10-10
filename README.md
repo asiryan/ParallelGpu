@@ -160,6 +160,8 @@ Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` u
 
 ## Execution rules and limitations
 
+The automatic lambda API requires runtime code generation (`Reflection.Emit`) and access to method IL. It is not supported in [Native AOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) applications.
+
 - Loops cover `[fromInclusive, toExclusive)` with at most `Int32.MaxValue` iterations. Empty and reversed ranges execute no body. Iterations are unordered; independent writes, atomics, or reductions must prevent races.
 - Scalar captures are refreshed per call and are read-only in the body. Collection elements are writable; read-only views reject writes. Array/list topology cannot change during an automatic loop.
 - Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, and inverted `Clamp` bounds become host exceptions before automatic collection copyback. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
