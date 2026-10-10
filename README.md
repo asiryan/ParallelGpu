@@ -1,8 +1,8 @@
-# Parallel.Gpu
+# ParallelGpu
 
 Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write an ordinary lambda; the library compiles it, transfers captured collections, and copies results back before returning.
 
-The library targets .NET Standard 2.1. Build the solution and samples with the .NET 8 SDK. Reference `src/Parallel.Gpu.csproj` from your application.
+The library targets .NET Standard 2.1. Build the solution and samples with the .NET 8 SDK. Reference `src/ParallelGpu.csproj` from your application.
 
 ## Quick start
 
@@ -169,10 +169,10 @@ Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` u
 ## Build and test
 
 ```powershell
-dotnet build Parallel.Gpu.sln -c Release -warnaserror
-dotnet test tests/Parallel.Gpu.Tests.csproj -c Release
+dotnet build ParallelGpu.sln -c Release -warnaserror
+dotnet test tests/ParallelGpu.Tests.csproj -c Release
 $env:PARALLEL_GPU_TEST_BACKEND = 'Cuda'
-dotnet test tests/Parallel.Gpu.Tests.csproj -c Release
+dotnet test tests/ParallelGpu.Tests.csproj -c Release
 dotnet run --project samples/FloatMatrixMultiplication -c Release
 dotnet run --project samples/ComplexVectorMultiplication -c Release
 ```
