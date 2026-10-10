@@ -168,6 +168,8 @@ Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` u
 
 ## Build and test
 
+The library creates a NuGet package on build. Release packages are written to `sources/bin/Release/` and include the MIT license, package README, logo, and XML API documentation. Run `build.bat` to build the library and package, or use the solution commands below to build and test all projects.
+
 ```powershell
 dotnet build ParallelGpu.sln -c Release -warnaserror
 dotnet test tests/ParallelGpu.Tests.csproj -c Release
