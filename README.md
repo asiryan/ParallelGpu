@@ -1,6 +1,6 @@
-<p align="center"><img width="15%" src="docs/logo.png" /></p>  
+<p align="center"><img width="45%" src="docs/logo_big.png" /></p>  
 
-# ParallelGpu
+# About
 
 Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write an ordinary lambda; the library compiles it, transfers captured collections, and copies results back before returning.
 
@@ -170,7 +170,7 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 - Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native append/graph payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
 - Unsupported operations include direct managed/reference-bearing values, boxing, reflection, managed allocation, throwing bodies/exception handlers, checked integer arithmetic/conversions, dynamic managed dispatch, delegates, native pointers, and `ref struct` storage. Helpers remain subject to ILGPU and backend restrictions.
 
-## Build and test
+# Build and test
 
 The library creates a NuGet package on build. Release packages are written to `sources/bin/Release/` and include the MIT license, package README, logo, and XML API documentation. Run `build.bat` to build the library and package, or use the solution commands below to build and test all projects.
 
@@ -185,6 +185,6 @@ dotnet run --project samples/ComplexVectorMultiplication -c Release
 
 Tests default to the CPU backend. Set `PARALLEL_GPU_TEST_BACKEND` to `Cpu`, `Cuda`, `OpenCL`, or `Auto` to select a path; `Auto` requires a GPU. CPU and CUDA passed the 182-test audit. OpenCL remains unverified: the local RTX 4070 Ti driver lacks generic address-space support and cannot initialize the ILGPU OpenCL accelerator.
 
-## License
+# License
 
 **MIT**
