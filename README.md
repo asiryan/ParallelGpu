@@ -48,7 +48,7 @@ Automatic lambda loops support:
 | `struct` | Supported fields recursively, including private, readonly, nested, and generic structures |
 | `Nullable<T>` | Any supported payload type |
 
-Structures cannot contain managed references, native pointers, or explicit layout. `Complex` and value tuples are supported when their executed methods are device-compatible. Supporting a type does not imply support for every framework method on it.
+Structures cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. `Complex` and value tuples are supported when their executed methods are device-compatible. Supporting a type does not imply support for every framework method on it.
 
 | Collections and views | Contract |
 | --- | --- |
@@ -189,7 +189,7 @@ dotnet run --project samples/FloatMatrixMultiplication -c Release
 dotnet run --project samples/ComplexVectorMultiplication -c Release
 ```
 
-Tests default to the CPU backend. Set `PARALLEL_GPU_TEST_BACKEND` to `Cpu`, `Cuda`, `OpenCL`, or `Auto` to select a path; `Auto` requires a GPU. CPU and CUDA passed the 182-test audit. OpenCL remains unverified: the local RTX 4070 Ti driver lacks generic address-space support and cannot initialize the ILGPU OpenCL accelerator.
+Tests default to the CPU backend. Set `PARALLEL_GPU_TEST_BACKEND` to `Cpu`, `Cuda`, `OpenCL`, or `Auto` to select a path; `Auto` requires a GPU. CPU and CUDA passed the 215-test audit. OpenCL remains unverified: the local RTX 4070 Ti driver lacks generic address-space support and cannot initialize the ILGPU OpenCL accelerator.
 
 # License
 
