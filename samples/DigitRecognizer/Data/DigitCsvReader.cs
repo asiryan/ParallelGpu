@@ -3,78 +3,15 @@ using System.IO.Compression;
 
 namespace DigitRecognizer;
 
-/// <summary>Stores normalized, row-major images and their optional digit labels on the host.</summary>
-public sealed class DigitDataset
+/// <summary>Parses and validates normalized digit datasets from CSV entries in the downloaded archive.</summary>
+internal static class DigitCsvReader
 {
-    /// <summary>The width and height of every grayscale digit image.</summary>
-    public const int ImageWidth = 28;
-
-    /// <summary>The number of pixels supplied to the network for one image.</summary>
-    public const int InputSize = ImageWidth * ImageWidth;
-
-    /// <summary>The number of possible digit labels, from zero through nine.</summary>
-    public const int ClassCount = 10;
-
-    /// <summary>Gets the flat image array, with one consecutive block of normalized pixels per image.</summary>
-    public float[] Pixels { get; }
-
-    /// <summary>Gets the digit labels, or null for the unlabeled Kaggle test set.</summary>
-    public int[]? Labels { get; }
-
-    /// <summary>Gets the number of complete images in this dataset.</summary>
-    public int Count { get; }
-
-    /// <summary>Wraps complete image arrays without copying their contents.</summary>
-    /// <param name="pixels">Row-major pixels normalized to the range from zero through one.</param>
-    /// <param name="labels">One label per image, or null when the dataset is unlabeled.</param>
-    /// <exception cref="ArgumentNullException">The pixel array is null.</exception>
-    /// <exception cref="ArgumentException">The pixel array is empty, contains an incomplete image, or does not match the label count.</exception>
-    public DigitDataset(float[] pixels, int[]? labels)
-    {
-        ArgumentNullException.ThrowIfNull(pixels);
-        if (pixels.Length == 0 || pixels.Length % InputSize != 0)
-            throw new ArgumentException("Pixels must contain at least one complete 28 x 28 image.", nameof(pixels));
-        if (labels is not null && labels.Length != pixels.Length / InputSize)
-            throw new ArgumentException("The number of labels must match the number of images.", nameof(labels));
-
-        Pixels = pixels;
-        Labels = labels;
-        Count = pixels.Length / InputSize;
-    }
-}
-
-/// <summary>Contains the labeled training set and unlabeled competition test set loaded from one archive.</summary>
-/// <param name="Training">The labeled images used for training and local validation.</param>
-/// <param name="Test">The unlabeled images used to produce competition predictions.</param>
-public readonly record struct DigitArchiveData(DigitDataset Training, DigitDataset Test);
-
-/// <summary>Reads the Kaggle Digit Recognizer CSV files directly from their downloaded ZIP archive.</summary>
-public static class DigitArchive
-{
-    /// <summary>Loads and validates both CSV datasets without extracting the archive to disk.</summary>
-    /// <param name="archivePath">The path to the downloaded digit-recognizer.zip file.</param>
-    /// <returns>Normalized training pixels with labels, and normalized test pixels without labels.</returns>
-    /// <exception cref="ArgumentException">The archive path is null or empty.</exception>
-    /// <exception cref="IOException">The archive cannot be opened or read.</exception>
-    /// <exception cref="InvalidDataException">The ZIP or a required CSV file is missing, empty, or malformed.</exception>
-    public static DigitArchiveData Load(string archivePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
-        using var archive = ZipFile.OpenRead(archivePath);
-        var trainingEntry = archive.GetEntry("train.csv")
-            ?? throw new InvalidDataException("The archive does not contain train.csv.");
-        var testEntry = archive.GetEntry("test.csv")
-            ?? throw new InvalidDataException("The archive does not contain test.csv.");
-
-        return new(ReadDataset(trainingEntry, labeled: true), ReadDataset(testEntry, labeled: false));
-    }
-
     /// <summary>Counts rows first, then parses directly into precisely sized dataset arrays.</summary>
     /// <param name="entry">The CSV member inside the archive.</param>
     /// <param name="labeled">Whether the first column contains a digit label.</param>
     /// <returns>The validated dataset with byte intensities scaled to the range from zero through one.</returns>
     /// <exception cref="InvalidDataException">The header, row width, integer values, or row count is invalid.</exception>
-    private static DigitDataset ReadDataset(ZipArchiveEntry entry, bool labeled)
+    internal static DigitDataset Read(ZipArchiveEntry entry, bool labeled)
     {
         int count = CountRows(entry, labeled);
         if (count > Array.MaxLength / DigitDataset.InputSize)
