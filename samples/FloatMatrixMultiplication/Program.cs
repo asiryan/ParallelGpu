@@ -6,33 +6,42 @@ const int Rows = 2048;
 const int Inner = 2048;
 const int Columns = 2048;
 
-float[][] a = Matrices.Random(Rows, Inner, seed: 12345);
-float[][] b = Matrices.Random(Inner, Columns, seed: 67890);
-
-using var gpu = new Gpu(new GpuOptions
+try
 {
-    Backend = GpuBackend.Auto,
-    AllowCpuFallback = true
-});
+    float[][] a = Matrices.Random(Rows, Inner, seed: 12345);
+    float[][] b = Matrices.Random(Inner, Columns, seed: 67890);
 
-Console.WriteLine($"A: {Rows} x {Inner}, B: {Inner} x {Columns}");
+    using var gpu = new Gpu(new GpuOptions
+    {
+        Backend = GpuBackend.Auto,
+        AllowCpuFallback = true
+    });
 
-// Exclude initial CPU JIT and accelerator kernel compilation from timing.
-MatrixProduct.MultiplyOnCpu(a, b);
-MatrixProduct.MultiplyOnGpu(gpu, a, b);
+    Console.WriteLine($"A: {Rows} x {Inner}, B: {Inner} x {Columns}");
 
-var timer = Stopwatch.StartNew();
-float[][] cpuResult = MatrixProduct.MultiplyOnCpu(a, b);
-timer.Stop();
-Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
+    // Exclude initial CPU JIT and accelerator kernel compilation from timing.
+    MatrixProduct.MultiplyOnCpu(a, b);
+    MatrixProduct.MultiplyOnGpu(gpu, a, b);
 
-Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
+    var timer = Stopwatch.StartNew();
+    float[][] cpuResult = MatrixProduct.MultiplyOnCpu(a, b);
+    timer.Stop();
+    Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
-timer.Restart();
-float[][] gpuResult = MatrixProduct.MultiplyOnGpu(gpu, a, b);
-timer.Stop();
-Console.WriteLine($"{gpu.Backend} For<float>, including array transfers: {timer.Elapsed.TotalMilliseconds:F3} ms");
+    Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
 
-double maxError = Matrices.CheckEqual(cpuResult, gpuResult);
-Console.WriteLine($"Result: {Rows} x {Columns}. Validation passed, maximum error: {maxError:G6}");
+    timer.Restart();
+    float[][] gpuResult = MatrixProduct.MultiplyOnGpu(gpu, a, b);
+    timer.Stop();
+    Console.WriteLine($"{gpu.Backend} For<float>, including array transfers: {timer.Elapsed.TotalMilliseconds:F3} ms");
+
+    double maxError = Matrices.CheckEqual(cpuResult, gpuResult);
+    Console.WriteLine($"Result: {Rows} x {Columns}. Validation passed, maximum error: {maxError:G6}");
+    return 0;
+}
+catch (Exception error) when (error is ArgumentException or InvalidOperationException or OverflowException)
+{
+    Console.Error.WriteLine($"FloatMatrixMultiplication failed: {error.Message}");
+    return 1;
+}
 
