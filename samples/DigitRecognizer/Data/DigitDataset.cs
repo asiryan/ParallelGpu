@@ -21,11 +21,12 @@ public sealed class DigitDataset
     /// <summary>Gets the number of complete images in this dataset.</summary>
     public int Count { get; }
 
-    /// <summary>Wraps complete image arrays without copying their contents.</summary>
+    /// <summary>Validates and wraps complete image arrays without copying their contents.</summary>
     /// <param name="pixels">Row-major pixels normalized to the range from zero through one.</param>
     /// <param name="labels">One label per image, or null when the dataset is unlabeled.</param>
     /// <exception cref="ArgumentNullException">The pixel array is null.</exception>
-    /// <exception cref="ArgumentException">The pixel array is empty, contains an incomplete image, or does not match the label count.</exception>
+    /// <remarks>The caller must keep the wrapped arrays within the validated pixel and label ranges.</remarks>
+    /// <exception cref="ArgumentException">Image dimensions or label counts do not match, a pixel is not finite and within zero through one, or a label is outside zero through nine.</exception>
     public DigitDataset(float[] pixels, int[]? labels)
     {
         ArgumentNullException.ThrowIfNull(pixels);
@@ -33,6 +34,13 @@ public sealed class DigitDataset
             throw new ArgumentException("Pixels must contain at least one complete 28 x 28 image.", nameof(pixels));
         if (labels is not null && labels.Length != pixels.Length / InputSize)
             throw new ArgumentException("The number of labels must match the number of images.", nameof(labels));
+        foreach (float pixel in pixels)
+            if (!float.IsFinite(pixel) || pixel < 0 || pixel > 1)
+                throw new ArgumentException("Pixels must be finite and normalized between zero and one.", nameof(pixels));
+        if (labels is not null)
+            foreach (int label in labels)
+                if ((uint)label >= ClassCount)
+                    throw new ArgumentException("Digit labels must be between zero and nine.", nameof(labels));
 
         Pixels = pixels;
         Labels = labels;

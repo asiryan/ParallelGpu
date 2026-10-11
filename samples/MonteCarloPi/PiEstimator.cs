@@ -49,16 +49,19 @@ public sealed class PiEstimator
     }
 
     /// <summary>Compiles the sampling and reduction kernels using a small portion of the configured points.</summary>
-    /// <remarks>The random sequence has no mutable state, so warm-up does not affect the estimate.</remarks>
+    /// <remarks>Warm-up samples at most 65,536 points. The random sequence has no mutable state,
+    /// so warm-up does not affect the estimate.</remarks>
+    /// <exception cref="ObjectDisposedException">The borrowed GPU executor has been disposed.</exception>
     public void WarmUp()
     {
-        int iterations = Math.Min(IterationCount, 256);
-        long samples = Math.Min(SampleCount, (long)iterations * SamplesPerIteration);
+        long samples = Math.Min(SampleCount, Math.Min(65_536L, (long)256 * SamplesPerIteration));
+        int iterations = (int)((samples - 1) / SamplesPerIteration + 1);
         CountHits(iterations, samples);
     }
 
     /// <summary>Generates the configured points, counts hits on the GPU, and computes the scalar pi estimate.</summary>
     /// <returns>The sample count, quarter-circle hit count, and resulting estimate.</returns>
+    /// <exception cref="ObjectDisposedException">The borrowed GPU executor has been disposed.</exception>
     public PiEstimate Estimate()
     {
         long hits = CountHits(IterationCount, SampleCount);

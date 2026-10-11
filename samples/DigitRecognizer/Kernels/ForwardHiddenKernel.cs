@@ -52,7 +52,8 @@ public readonly struct ForwardHiddenKernel : IGpuForKernel
         float sum = inputBias[neuron];
         for (int input = 0; input < 784; input++)
             sum += pixels[pixelOffset + input] * inputWeights[input * hiddenSize + neuron];
-        hidden[index] = sum > 0 ? sum : 0;
+        // Preserve NaN so held-out loss detects nonfinite training state instead of silently masking it.
+        hidden[index] = sum < 0 ? 0 : sum;
     }
 }
 

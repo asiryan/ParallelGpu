@@ -36,16 +36,16 @@ internal sealed class NetworkTrainer
 
         var trainingTimer = Stopwatch.StartNew();
         EvaluationResult final = initial;
-        for (int epoch = 1; epoch <= settings.Epochs; epoch++)
+        for (int epochIndex = 0; epochIndex < settings.Epochs; epochIndex++)
         {
             split.ShuffleTraining();
             // Smaller steps in later epochs let the deeper network refine its learned weights.
-            float learningRate = settings.LearningRate * MathF.Pow(settings.LearningRateDecay, epoch - 1);
+            float learningRate = settings.LearningRate * MathF.Pow(settings.LearningRateDecay, epochIndex);
             timer.Restart();
             network.TrainEpoch(split.TrainingIndices, learningRate);
             double trainingSeconds = timer.Elapsed.TotalSeconds;
             final = network.Evaluate(split.ValidationIndices);
-            Console.WriteLine($"Epoch {epoch}/{settings.Epochs}: learning rate {learningRate:F4}, held-out loss {final.MeanLoss:F4}, accuracy {final.Accuracy:P2}, training {trainingSeconds:F2} s, including evaluation {timer.Elapsed.TotalSeconds:F2} s");
+            Console.WriteLine($"Epoch {epochIndex + 1}/{settings.Epochs}: learning rate {learningRate:F4}, held-out loss {final.MeanLoss:F4}, accuracy {final.Accuracy:P2}, training {trainingSeconds:F2} s, including evaluation {timer.Elapsed.TotalSeconds:F2} s");
         }
         trainingTimer.Stop();
         Console.WriteLine($"Final held-out test: {final.Accuracy:P2} accuracy on {final.Count:N0} images; loss {final.MeanLoss:F4}");

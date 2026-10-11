@@ -11,6 +11,10 @@ TimeSpan budget = TimeSpan.FromSeconds(30);
 
 try
 {
+    // Fail before GPU setup when the synthetic target is outside the configured candidate space.
+    ArgumentException.ThrowIfNullOrEmpty(DemoPassword);
+    if (DemoPassword.Length < MinimumPasswordLength || DemoPassword.Length > MaximumPasswordLength)
+        throw new ArgumentException("DemoPassword length must be within the configured candidate length range.");
     foreach (char character in DemoPassword)
         if (character < 'a' || character > 'z')
             throw new ArgumentException("DemoPassword must contain only lowercase letters a-z.");

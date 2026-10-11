@@ -59,6 +59,10 @@ internal sealed class DigitRecognizerSettings
             throw new ArgumentOutOfRangeException(nameof(LearningRate));
         if (!float.IsFinite(LearningRateDecay) || LearningRateDecay <= 0 || LearningRateDecay > 1)
             throw new ArgumentOutOfRangeException(nameof(LearningRateDecay));
+        float finalLearningRate = LearningRate * MathF.Pow(LearningRateDecay, Epochs - 1);
+        if (!float.IsFinite(finalLearningRate) || finalLearningRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(LearningRateDecay),
+                "The learning rate must remain finite and positive through the final epoch.");
         if (!float.IsFinite(Momentum) || Momentum < 0 || Momentum >= 1)
             throw new ArgumentOutOfRangeException(nameof(Momentum));
         if (!float.IsFinite(WeightDecay) || WeightDecay < 0)

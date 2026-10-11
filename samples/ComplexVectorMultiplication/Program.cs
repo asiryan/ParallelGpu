@@ -29,7 +29,7 @@ try
     timer.Stop();
     Console.WriteLine($"CPU Parallel.For: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
-    Console.WriteLine($"Device GPU: {gpu.DeviceName} ({gpu.Backend})");
+    Console.WriteLine($"Device: {gpu.DeviceName} ({gpu.Backend})");
 
     timer.Restart();
     Complex gpuResult = VectorProduct.MultiplyOnGpu(gpu, a, b);
