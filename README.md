@@ -190,6 +190,7 @@ $env:PARALLEL_GPU_TEST_BACKEND = 'Cuda'
 dotnet test tests/ParallelGpu.Tests.csproj -c Release
 dotnet run --project samples/FloatMatrixMultiplication -c Release
 dotnet run --project samples/ComplexVectorMultiplication -c Release
+dotnet run --project samples/PasswordHashSearch -c Release
 ```
 
 Tests default to the CPU backend. Set `PARALLEL_GPU_TEST_BACKEND` to `Cpu`, `Cuda`, `OpenCL`, or `Auto` to select a path; `Auto` requires a GPU. Tests pass on CPU and CUDA. OpenCL remains unverified: the local RTX 4070 Ti driver lacks generic address-space support and cannot initialize the ILGPU OpenCL accelerator.
