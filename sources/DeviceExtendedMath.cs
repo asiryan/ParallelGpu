@@ -3,7 +3,9 @@ using ILGPU.Algorithms;
 
 namespace ParallelGpu;
 
-/// <summary>Portable framework math lowering with double precision and CLR exceptional cases.</summary>
+/// <summary>Lowers supported framework math with double intermediates and explicit exceptional-value handling.</summary>
+/// <remarks>Results are approximate, not necessarily correctly rounded; Pow can differ at underflow and overflow
+/// boundaries. Floating-point evaluation also depends on ILGPU backend optimizations.</remarks>
 internal static class DeviceExtendedMath
 {
     private const double Ln2High = 0.69314718036912381649017333984375;
@@ -66,7 +68,7 @@ internal static class DeviceExtendedMath
         };
     }
 
-    /// <summary>Reduces every finite double to the nearest multiple of pi/2 in bounded work.</summary>
+    /// <summary>Reduces a nonnegative finite double to a remainder in [-pi/4, pi/4] and its quadrant in bounded work.</summary>
     private static double ReduceAngle(double positive, out int quadrant)
     {
         quadrant = 0;

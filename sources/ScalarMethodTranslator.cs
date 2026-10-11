@@ -3,7 +3,7 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Maps helper methods and constructors to the device representations of their value types.</summary>
+/// <summary>Maps helpers and constructors to device value and collection representations and guarded operations.</summary>
 /// <remarks>Compatible methods retain their original implementation unless a signature, local,
 /// field, transitive call, or numeric operation needs representation conversion or deferred error guards.</remarks>
 internal sealed class ScalarMethodTranslator
@@ -28,7 +28,7 @@ internal sealed class ScalarMethodTranslator
 
     /// <summary>Maps supported values, collections, and by-reference types to their device representations.</summary>
     /// <param name="type">The original value or reference type.</param>
-    /// <returns>The corresponding device-compatible type.</returns>
+    /// <returns>The mapped type; unsupported types are left unchanged for separate compatibility validation.</returns>
     internal static Type MapType(Type type)
     {
         if (type.IsByRef)
@@ -42,11 +42,19 @@ internal sealed class ScalarMethodTranslator
             ? typeof(DeviceCollection) : DeviceValueType.MapType(type);
     }
 
+    /// <summary>Checks whether a signature uses supported values, recognized native views, or translated collections.</summary>
+    /// <param name="type">The signature type, including void or by-reference types.</param>
+    /// <returns>Whether the signature category is supported; native payload validation occurs during mapping.</returns>
     internal static bool IsCompatible(Type type) => type == typeof(void) ||
         DeviceValueType.IsSupported(type.IsByRef ? type.GetElementType()! : type) ||
         DeviceNativeTypes.IsSupported(type.IsByRef ? type.GetElementType()! : type) ||
         CapturedCollection.ElementType(type.IsByRef ? type.GetElementType()! : type) is not null;
 
+    /// <summary>Emits a translated collection call, mapped helper, or unchanged compatible method call.</summary>
+    /// <param name="il">The destination IL generator.</param>
+    /// <param name="method">The original called method.</param>
+    /// <param name="emitContext">Emits the invocation context when the replacement requires it.</param>
+    /// <param name="receiverType">The original receiver type inferred from the stack, when available.</param>
     internal void EmitCall(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext,
         Type? receiverType = null)
     {
@@ -233,6 +241,7 @@ internal sealed class ScalarMethodTranslator
         return replacement;
     }
 
+    /// <summary>Emits a nullable payload read that defers the absent-value exception to the host.</summary>
     private static void EmitNullableValue(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext)
     {
         var fields = method.DeclaringType!.GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
@@ -253,6 +262,8 @@ internal sealed class ScalarMethodTranslator
         il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(value));
         il.Emit(OpCodes.Ret);
     }
+    /// <summary>Emits stack-compatible narrow conversions, guarded integer division/remainder, or floating remainder.</summary>
+    /// <returns>True if a replacement was emitted; false for an instruction requiring no arithmetic lowering.</returns>
     internal static bool TryEmitArithmetic(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Action<ILGenerator> emitContext)
     {
@@ -299,6 +310,7 @@ internal sealed class ScalarMethodTranslator
         return true;
     }
 
+    /// <summary>Binds supported Abs, Min, Max, and CopySign calls to their explicit device implementations.</summary>
     private MethodInfo TranslateArithmeticMethod(MethodInfo original)
     {
         var type = original.ReturnType;
@@ -316,6 +328,7 @@ internal sealed class ScalarMethodTranslator
         il.Emit(OpCodes.Ret);
         return builder;
     }
+    /// <summary>Emits ordered Clamp comparisons and a deferred error for inverted bounds.</summary>
     private MethodInfo TranslateClamp(MethodInfo original)
     {
         var type = original.ReturnType;
@@ -358,7 +371,7 @@ internal sealed class ScalarMethodTranslator
     /// <summary>Checks whether a signature, local, field, transitive call, or numeric operation needs translation.</summary>
     /// <param name="method">The helper to inspect.</param>
     /// <param name="visited">The methods already inspected along the current call graph.</param>
-    /// <returns>True when value mapping or guarded numeric translation is required.</returns>
+    /// <returns>True when value mapping, arithmetic lowering, or translation of a transitive call is required.</returns>
     private static bool RequiresTranslation(MethodBase method, HashSet<MethodBase> visited)
     {
         if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly || !visited.Add(method))

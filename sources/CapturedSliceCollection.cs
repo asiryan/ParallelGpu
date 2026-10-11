@@ -1,6 +1,7 @@
 namespace ParallelGpu;
 
-/// <summary>Exposes a host collection slice through the existing allocation and write flag of its backing array.</summary>
+/// <summary>Exposes a host collection slice through the existing allocation and write flag of its backing collection.</summary>
+/// <remarks>Read-only status belongs to this alias; writable aliases still share the same backing storage.</remarks>
 internal sealed class CapturedSliceCollection<T> : CapturedCollection
 {
     private readonly CapturedCollection<T> backing;

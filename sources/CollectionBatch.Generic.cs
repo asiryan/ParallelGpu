@@ -24,7 +24,7 @@ internal sealed class CollectionBatch<T> : CollectionBatch
     /// <summary>Gets the physical distance between elements in bytes, including Boolean and character padding.</summary>
     internal int ElementSize => UsesPaddedStorage ? sizeof(int) : valueBuffer!.ElementSize;
 
-    /// <summary>Gets whether the device requires aligned 32-bit slots for this host element type.</summary>
+    /// <summary>Gets whether this batch uses aligned 32-bit slots for its host element type.</summary>
     private static bool UsesPaddedStorage => typeof(T) == typeof(bool) || typeof(T) == typeof(char);
 
     /// <summary>Reserves a contiguous slice for a leaf collection.</summary>

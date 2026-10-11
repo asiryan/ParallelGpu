@@ -3,8 +3,9 @@ namespace ParallelGpu;
 /// <summary>Describes contiguous host storage exposed by an indexed collection adapter.</summary>
 /// <typeparam name="T">The runtime-validated GPU loop element type.</typeparam>
 /// <remarks>Return the same backing array for shared storage. For staged storage, supply a shared identity
-/// and a commit callback; one snapshot and commit are used per identity and invocation. Shared identities
-/// require the same element type and full buffer length. An array identity denotes that exact native storage.
+/// and a commit callback; one backing buffer and at most one commit are used per identity and invocation.
+/// Shared identities require the same element type and full buffer length. An array or List identity
+/// denotes that exact native storage.
 /// Slices transfer the full backing buffer; read-only restrictions apply to each view. Commits run after
 /// successful execution and downloads, only for backing storage marked as written. Callback exceptions
 /// can leave partial host changes.</remarks>
@@ -13,7 +14,7 @@ public readonly struct GpuCollectionSnapshot<T>
     /// <summary>Creates a snapshot covering an entire backing array.</summary>
     /// <param name="buffer">The shared backing array or staged full-storage snapshot.</param>
     /// <param name="isReadOnly">Whether device writes through this collection are forbidden.</param>
-    /// <param name="commit">An optional callback receiving the updated entire buffer after a successful loop.</param>
+    /// <param name="commit">An optional callback receiving the updated entire buffer after a successful loop that marked the shared storage as written.</param>
     /// <param name="identity">The shared host storage identity, defaulting to the backing array.</param>
     /// <exception cref="ArgumentNullException">The backing buffer is null.</exception>
     public GpuCollectionSnapshot(T[] buffer, bool isReadOnly = false, Action<T[]>? commit = null, object? identity = null)
@@ -24,7 +25,7 @@ public readonly struct GpuCollectionSnapshot<T>
     /// <param name="offset">The zero-based first element of the slice.</param>
     /// <param name="count">The number of accessible elements.</param>
     /// <param name="isReadOnly">Whether device writes through this collection are forbidden.</param>
-    /// <param name="commit">An optional callback receiving the updated entire buffer after a successful loop.</param>
+    /// <param name="commit">An optional callback receiving the updated entire buffer after a successful loop that marked the shared storage as written.</param>
     /// <param name="identity">The shared host storage identity, defaulting to the backing array.</param>
     /// <exception cref="ArgumentNullException">The backing buffer is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The offset or count is outside the backing buffer.</exception>
@@ -51,7 +52,7 @@ public readonly struct GpuCollectionSnapshot<T>
     public int Count { get; }
     /// <summary>Gets whether writes through this view are forbidden.</summary>
     public bool IsReadOnly { get; }
-    /// <summary>Gets the optional host callback used after a successful device write.</summary>
+    /// <summary>Gets the optional host callback used after successful execution and download of written storage.</summary>
     public Action<T[]>? Commit { get; }
     /// <summary>Gets the host storage identity used to unify staged aliases.</summary>
     public object Identity { get; }

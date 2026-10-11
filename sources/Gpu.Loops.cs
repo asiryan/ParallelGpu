@@ -22,10 +22,11 @@ public sealed partial class Gpu
     /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
     /// Captured append and graph views must be live and owned by this executor. Their result APIs check their
     /// own deferred errors, and their device writes are not rolled back on a loop failure.</para>
+    /// <para>Requires runtime code generation and method IL; Native AOT is unsupported.</para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException">The body is null, or a three-argument ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">A captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
+    /// <exception cref="ArgumentException">An intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, or an ArraySegment constructor range exceeds its array.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
     /// <exception cref="NotSupportedException">The body uses unsupported operations, including checked integer arithmetic or conversions, or a captured collection is unsupported.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
@@ -42,10 +43,11 @@ public sealed partial class Gpu
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
     /// <remarks>Use the non-generic overload for mixed collection element types.
-    /// Compilation and transfers are automatic, and results are available on return.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null, or a three-argument ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">A captured collection has a different element type, a captured native view belongs to another executor, or Math.Clamp used inverted bounds.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, or invalid slice.</exception>
+    /// Compilation and transfers are automatic, and results are available on return.
+    /// The element type is validated even for empty and reversed ranges; other execution rules match the non-generic overload.</remarks>
+    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type, an intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, or an ArraySegment constructor range exceeds its array.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
     /// <exception cref="NotSupportedException">The element type, body, or captured collection is unsupported, including checked integer arithmetic or conversions.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>

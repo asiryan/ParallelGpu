@@ -4,10 +4,12 @@ namespace ParallelGpu;
 /// <typeparam name="T">The public unmanaged, ILGPU-supported value type.</typeparam>
 /// <remarks>Implementations must be public value types with device-compatible state and pure methods.
 /// Combine must be associative and Identity must be neutral on both sides. Input order is preserved,
-/// so commutativity is not required. Floating-point operations follow the reduction tree's rounding.</remarks>
+/// so commutativity is not required. Floating-point operations follow the reduction tree's rounding.
+/// State and values use their native ILGPU representation without automatic lambda value conversion.</remarks>
 public interface IGpuReduction<T> where T : unmanaged
 {
     /// <summary>Gets the neutral value returned when the input is empty.</summary>
+    /// <remarks>Evaluated on the host for empty input and on the device during reduction passes.</remarks>
     T Identity { get; }
 
     /// <summary>Combines two consecutive portions of the input.</summary>

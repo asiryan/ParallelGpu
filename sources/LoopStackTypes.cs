@@ -6,6 +6,10 @@ namespace ParallelGpu;
 /// <summary>Tracks IL stack types for collection reference comparisons and guarded integer arithmetic.</summary>
 internal static class LoopStackTypes
 {
+    /// <summary>Propagates original evaluation-stack types across reachable instructions and control-flow joins.</summary>
+    /// <param name="method">The method supplying argument and local types.</param>
+    /// <param name="instructions">Decoded instructions in source order.</param>
+    /// <returns>Stack types before each reachable instruction, keyed by its original IL offset.</returns>
     internal static Dictionary<int, Type?[]> Analyze(MethodBase method, List<LoopInstruction> instructions)
     {
         var states = new Dictionary<int, Type?[]>();
@@ -66,6 +70,8 @@ internal static class LoopStackTypes
         return width > 0 && width == DeviceArithmetic.IntegerWidth(right)
             ? width == 32 ? typeof(int) : typeof(long) : typeof(object);
     }
+    /// <summary>Rewrites null values, null tests, and reference comparisons for translated collection descriptors.</summary>
+    /// <returns>True if a replacement was emitted; otherwise false.</returns>
     internal static bool TryEmitReferenceOperation(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Dictionary<int, Label> labels, Action<ILGenerator> emitContext)
     {

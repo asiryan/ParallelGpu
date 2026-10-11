@@ -10,7 +10,7 @@ internal static class ReadOnlyCapture
     /// <param name="instructions">The original loop instructions.</param>
     /// <param name="position">The instruction that loads the captured value's address.</param>
     /// <param name="collection">Whether indexed writes through the captured view are allowed.</param>
-    /// <exception cref="NotSupportedException">The address can be written, passed by reference, or escape.</exception>
+    /// <exception cref="NotSupportedException">The captured value itself can be modified or its address can escape.</exception>
     internal static void Validate(List<LoopInstruction> instructions, int position, bool collection = false)
     {
         // Follow branches while the address is live, tracking only the stack suffix above this capture.

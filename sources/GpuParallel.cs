@@ -2,8 +2,9 @@ namespace ParallelGpu;
 
 /// <summary>Provides GPU parallel loops with ordinary C# bodies and automatic collection transfers.</summary>
 /// <remarks>Overloads without options reuse a lazily created default executor.
-/// Overloads with options create an executor for each call; use <see cref="Gpu"/> to reuse
-/// a configured device and its compiled kernels.</remarks>
+/// Nonempty calls with options create an executor for each call; use <see cref="Gpu"/> to reuse
+/// a configured device and its compiled kernels. Loop-body restrictions and deferred errors match the
+/// ordinary lambda overloads on <see cref="Gpu"/>.</remarks>
 public static class GpuParallel
 {
     /// <summary>The process-wide executor, initialized only when a non-empty default loop runs.</summary>
@@ -43,7 +44,8 @@ public static class GpuParallel
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
-    /// <remarks>Use the non-generic overload for mixed collection types. Results are available on return.</remarks>
+    /// <remarks>Use the non-generic overload for mixed collection types. Results are available on return.
+    /// Empty and reversed ranges do not initialize the default executor, but the element type is still validated.</remarks>
     /// <exception cref="ArgumentNullException">The body is null.</exception>
     /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
@@ -87,7 +89,8 @@ public static class GpuParallel
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="options">Backend, device index, and fallback settings.</param>
     /// <param name="body">The device-compatible loop body.</param>
-    /// <remarks>The executor is disposed after execution. Use <see cref="Gpu"/> for repeated configured calls.</remarks>
+    /// <remarks>The executor is disposed after execution. Use <see cref="Gpu"/> for repeated configured calls.
+    /// Empty and reversed ranges create no executor, but the element type is still validated.</remarks>
     /// <exception cref="ArgumentNullException">The options or body is null.</exception>
     /// <exception cref="ArgumentException">A captured collection has a different element type.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The device selection or loop range is invalid.</exception>

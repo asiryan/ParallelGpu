@@ -3,7 +3,7 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Builds rank-specialized collection accessors without temporary index arrays on the device.</summary>
+/// <summary>Maps collection operations and builds rank-specific array accessors without device index arrays.</summary>
 internal sealed class CollectionMethodTranslator(TypeBuilder helpers)
 {
     private readonly Dictionary<MethodInfo, MethodInfo> accessors = new();

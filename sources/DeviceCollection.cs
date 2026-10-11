@@ -25,7 +25,7 @@ internal readonly struct DeviceCollection
     public readonly int ShapeOffset;
     /// <summary>The array rank; lists and flat views have rank one.</summary>
     public readonly int Rank;
-    /// <summary>The invocation-local host reference identity; zero denotes null.</summary>
+    /// <summary>The invocation-local host reference identity; zero denotes null and minus one denotes a synthesized empty value view.</summary>
     public readonly int Identity;
     /// <summary>The invocation's deferred error and safe-reference context.</summary>
     public readonly DeviceExecutionContext Context;
@@ -50,13 +50,13 @@ internal readonly struct DeviceCollection
     /// <param name="writes">The shared write flags.</param>
     /// <param name="dirtyIndex">The leaf's write-flag index, or minus one for a container.</param>
     /// <param name="shapeMetadata">The shared dimension metadata.</param>
-    /// <param name="shapeOffset">The first dimension's metadata offset.</param>
+    /// <param name="shapeOffset">The first dimension's metadata offset, or minus one for the inline shape.</param>
     /// <param name="rank">The array rank.</param>
     /// <param name="rowOffset">The first child's node metadata offset.</param>
-    /// <param name="identity">The host reference identity.</param>
+    /// <param name="identity">The host reference identity; zero denotes null and minus one a synthesized empty value view.</param>
     /// <param name="context">The invocation's deferred error context.</param>
     /// <param name="readOnly">One for a read-only view, otherwise zero.</param>
-    /// <param name="indexErrorCode">Three for array bounds, or nine for collection indexers.</param>
+    /// <param name="indexErrorCode">Three for array/span bounds, or nine for list/segment indexers.</param>
     public DeviceCollection(ArrayView<byte> bytes, int length, int rows = -1, int columns = 0,
         ArrayView<int> rowMetadata = default, int elementSize = 0,
         ArrayView<int> writes = default, int dirtyIndex = -1,
@@ -86,7 +86,7 @@ internal readonly struct DeviceCollection
     /// <typeparam name="T">The device element type.</typeparam>
     /// <param name="collection">The leaf view.</param>
     /// <param name="index">The zero-based flat index.</param>
-    /// <returns>The element.</returns>
+    /// <returns>The element, or the default value after recording a null or bounds error.</returns>
     public static T Read<T>(DeviceCollection collection, int index) where T : unmanaged
     {
         if (!ValidIndex(collection, index))
@@ -99,6 +99,7 @@ internal readonly struct DeviceCollection
     /// <param name="collection">The leaf view.</param>
     /// <param name="index">The zero-based flat index.</param>
     /// <param name="value">The value to store.</param>
+    /// <remarks>Invalid or read-only accesses record a deferred error without changing the element.</remarks>
     public static void Write<T>(DeviceCollection collection, int index, T value) where T : unmanaged
     {
         if (!ValidIndex(collection, index))
@@ -116,7 +117,7 @@ internal readonly struct DeviceCollection
     /// <typeparam name="T">The device element type.</typeparam>
     /// <param name="collection">The leaf view.</param>
     /// <param name="index">The zero-based flat index.</param>
-    /// <returns>A reference to the device element.</returns>
+    /// <returns>A reference to the device element, or work-item scratch storage after recording an invalid or read-only access.</returns>
     public static ref T Address<T>(DeviceCollection collection, int index) where T : unmanaged
     {
         if (!ValidIndex(collection, index))
@@ -134,7 +135,7 @@ internal readonly struct DeviceCollection
     /// <typeparam name="T">The device element type.</typeparam>
     /// <param name="collection">The leaf view.</param>
     /// <param name="index">The zero-based flat index.</param>
-    /// <returns>A reference for read-only access.</returns>
+    /// <returns>A reference for read-only access, or work-item scratch storage after recording a null or bounds error.</returns>
     public static ref T ReadOnlyAddress<T>(DeviceCollection collection, int index) where T : unmanaged
     {
         if (!ValidIndex(collection, index))

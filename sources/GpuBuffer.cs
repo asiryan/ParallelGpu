@@ -5,8 +5,9 @@ namespace ParallelGpu;
 
 /// <summary>Owns a device-resident buffer allocated by a <see cref="Gpu"/> instance.</summary>
 /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
-/// <remarks>Dispose the buffer when it is no longer needed. Its owner also releases outstanding buffers.
-/// Stored views must not be used after the buffer or its owner has been disposed.</remarks>
+/// <remarks>Host copies wait for completion and use the native element representation without automatic
+/// value conversion. Dispose the buffer when it is no longer needed; its owner also releases outstanding
+/// buffers. Stored views must not be used after the buffer or its owner has been disposed.</remarks>
 public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
 {
     /// <summary>The executor that owns this allocation and serializes access to it.</summary>

@@ -13,6 +13,7 @@ public sealed partial class Gpu
     /// <param name="capacity">The maximum output length; zero is allowed.</param>
     /// <returns>An independently disposable output buffer owned by this executor.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The capacity is negative.</exception>
+    /// <exception cref="NotSupportedException">The output type contains inline arrays or fixed-buffer storage.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public GpuAppendBuffer<T> CreateAppendBuffer<T>(int capacity) where T : unmanaged
     {
@@ -49,11 +50,14 @@ public sealed partial class Gpu
     /// <param name="capacity">The maximum number of output values.</param>
     /// <param name="kernel">The operation and its device-compatible state.</param>
     /// <returns>The produced values in unspecified iteration order.</returns>
-    /// <remarks>Empty and reversed ranges return an empty result. Overflow rejects the entire result
-    /// before any output values are copied to the host.</remarks>
+    /// <remarks>Empty and reversed ranges return an empty result without type validation or kernel
+    /// compilation. Overflow rejects the entire result before any output values are copied to the host.
+    /// Native views in kernel state must be live and belong to this executor; they are not validated
+    /// automatically. Other device writes are not rolled back on failure.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">The capacity is negative or the range is too large.</exception>
     /// <exception cref="ArgumentException">The output or operation type is not publicly visible.</exception>
     /// <exception cref="InvalidOperationException">The produced output exceeds capacity.</exception>
+    /// <exception cref="NotSupportedException">The output type contains inline arrays or fixed-buffer storage.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public T[] Collect<T, TKernel>(int fromInclusive, int toExclusive, int capacity, TKernel kernel)
         where T : unmanaged where TKernel : struct, IGpuCollectKernel<T>

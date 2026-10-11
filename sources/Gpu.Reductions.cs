@@ -14,10 +14,14 @@ public sealed partial class Gpu
     /// <param name="data">The host input array.</param>
     /// <param name="operation">The associative operation and its device-compatible state.</param>
     /// <returns>The ordered reduction, or the operation's identity for empty input.</returns>
-    /// <remarks>The input remains unchanged. Floating-point rounding follows a parallel tree and can
-    /// differ from a sequential sum or between devices with different group sizes.</remarks>
+    /// <remarks>The input remains unchanged. Empty input evaluates Identity on the host without
+    /// compiling a device kernel; a single element is returned without calling Combine.
+    /// Floating-point rounding follows a parallel tree and can differ from a sequential sum or
+    /// between devices with different group sizes.</remarks>
     /// <exception cref="ArgumentNullException">The input array is null.</exception>
     /// <exception cref="ArgumentException">An element or operation type is not publicly visible.</exception>
+    /// <exception cref="NotSupportedException">The input type contains inline arrays or fixed-buffer storage,
+    /// or a value cannot fit in device shared memory.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public T Reduce<T, TOperation>(T[] data, TOperation operation)
         where T : unmanaged where TOperation : struct, IGpuReduction<T>
@@ -43,7 +47,9 @@ public sealed partial class Gpu
     /// <param name="operation">The associative operation and its device-compatible state.</param>
     /// <returns>The ordered reduction, or the operation's identity for empty input.</returns>
     /// <remarks>Each pass reduces consecutive segments in shared memory. Passes use the same stream,
-    /// and only the final value is copied to the host. No global atomic accumulator is used.</remarks>
+    /// and only the final value is copied to the host. No global atomic accumulator is used.
+    /// Empty input evaluates Identity on the host; a single element is returned without calling Combine.
+    /// Both cases skip device kernel compilation.</remarks>
     /// <exception cref="ArgumentNullException">The input buffer is null.</exception>
     /// <exception cref="ArgumentException">The buffer belongs to another executor or a type is not public.</exception>
     /// <exception cref="NotSupportedException">A value cannot fit in device shared memory.</exception>

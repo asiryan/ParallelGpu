@@ -79,6 +79,7 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
     public int RootCount => roots.Length;
 
     /// <summary>Gets a device view for kernels executed by this graph's owner.</summary>
+    /// <remarks>The view does not own memory and must not outlive the graph or executor.</remarks>
     /// <exception cref="ObjectDisposedException">The graph or executor has been disposed.</exception>
     public GpuObjectGraphView<TRecord> View
     {
@@ -173,7 +174,7 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
                     throw new InvalidOperationException("The graph adapter must create a distinct non-null object for each new record.");
                 instances.Add(created);
             }
-            // Retain each new instance before applying callbacks so a retry preserves its identity.
+            // Retain each new instance before write callbacks so a retry preserves its identity.
             for (int i = objects.Count; i < instances.Count; i++)
             {
                 identities.Add(instances[i], i);

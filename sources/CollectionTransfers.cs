@@ -13,7 +13,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>Typed registration delegates shared across invocations to avoid repeated generic reflection.</summary>
     private static readonly ConcurrentDictionary<Type, Func<CollectionTransfers, object, Type, CapturedCollection>>
         factories = new();
-    /// <summary>Host wrappers grouped by element type and reference identity so distinct typed adapters retain their storage.</summary>
+    /// <summary>Host wrappers grouped by element type, capture declaration, and reference identity.</summary>
     private readonly Dictionary<(Type Element, Type? Declaration), Dictionary<object, CapturedCollection>> collections = new();
     /// <summary>Reference identities shared by all typed representations of the same host object.</summary>
     private readonly Dictionary<object, int> identities = new(ReferenceIdentityComparer.Instance);
@@ -54,7 +54,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <param name="source">The host collection to register.</param>
     /// <param name="elementType">The supported element type.</param>
     /// <param name="declaredType">The capture declaration selecting its native or adapted representation.</param>
-    /// <returns>The shared wrapper for the source object's identity.</returns>
+    /// <returns>The wrapper shared by aliases using the same element type and capture representation.</returns>
     internal CapturedCollection Add(object? source, Type elementType, Type declaredType) =>
         source is null ? new CapturedNullCollection(this) : factories.GetOrAdd(elementType, CreateFactory)(this, source, declaredType);
 
@@ -80,7 +80,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <typeparam name="T">The supported element type.</typeparam>
     /// <param name="source">The host collection to register.</param>
     /// <param name="declaredType">The optional declaration; internal backing registrations use native storage.</param>
-    /// <returns>The shared wrapper for the source object's identity.</returns>
+    /// <returns>The wrapper shared by aliases using the same element type and capture representation.</returns>
     internal CapturedCollection Add<T>(object source, Type? declaredType = null)
     {
         bool native = (source is Array || source is List<T>) &&
@@ -207,8 +207,9 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             batch.Upload(gpu);
     }
 
-    /// <summary>Reads write flags and copies affected collection slices into their original host objects.</summary>
-    /// <remarks>Validate deferred errors before calling this after device execution.</remarks>
+    /// <summary>Reads write flags, copies written backing leaves to the host, and commits staged adapters.</summary>
+    /// <remarks>All launches must succeed and deferred errors must be validated before calling this.
+    /// Each written adapter storage identity is committed at most once.</remarks>
     internal void CopyBack()
     {
         int[] written = writeBuffer!.ToArray();

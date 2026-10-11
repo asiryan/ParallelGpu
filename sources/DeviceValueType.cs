@@ -5,8 +5,9 @@ using System.Reflection.Emit;
 namespace ParallelGpu;
 
 /// <summary>Recognizes and maps fixed-size device values without managed references.</summary>
-/// <remarks>Visible structures with default packing and unchanged field types retain their native representation.
-/// Other supported structures use public mirrors with UInt16 character fields and Int32 Boolean fields.</remarks>
+/// <remarks>Visible structures with non-auto layout, default packing, and unchanged field types retain their native
+/// representation. Other supported structures use public mirrors preserving all instance fields, with UInt16
+/// character fields and Int32 Boolean fields.</remarks>
 internal static class DeviceValueType
 {
     /// <summary>Cached structural checks shared by compilation and collection registration.</summary>
@@ -31,8 +32,9 @@ internal static class DeviceValueType
 
     /// <summary>Checks primitives, enums, and recursively composed structures without managed references.</summary>
     /// <param name="type">The candidate value type.</param>
-    /// <returns>True when all instance fields use supported device values.</returns>
-    /// <remarks>Explicit layouts and native pointers are unsupported. Nullable values use a mapped presence flag and payload.
+    /// <returns>True for a supported primitive, enum, or structure whose instance fields use supported device values.</returns>
+    /// <remarks>Explicit layouts, inline arrays, fixed buffers, byref-like values, and native pointers are unsupported.
+    /// Nullable values use a mapped presence flag and payload.
     /// Method compatibility is checked separately by the device compiler.</remarks>
     internal static bool IsSupported(Type type) => supported.GetOrAdd(type, candidate =>
     {
@@ -71,7 +73,7 @@ internal static class DeviceValueType
 
     /// <summary>Maps characters, by-reference value types, and structures needing an accessible device mirror.</summary>
     /// <param name="type">The original value or reference type.</param>
-    /// <returns>The type used inside generated device code.</returns>
+    /// <returns>The mapped device value type, or the original type when no supported mapping applies.</returns>
     internal static Type MapType(Type type)
     {
         if (type.IsByRef)

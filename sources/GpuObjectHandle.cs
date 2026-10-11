@@ -11,7 +11,7 @@ public readonly struct GpuObjectHandle : IEquatable<GpuObjectHandle>
     /// <summary>The one-based record index, or zero for null.</summary>
     internal readonly int Value;
 
-    /// <summary>Creates an internal validated reference.</summary>
+    /// <summary>Builds a graph-specific reference from an internal record index.</summary>
     /// <param name="graphId">The owning graph identity.</param>
     /// <param name="value">The one-based record index.</param>
     internal GpuObjectHandle(int graphId, int value)

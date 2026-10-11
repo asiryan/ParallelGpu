@@ -2,7 +2,9 @@ namespace ParallelGpu;
 
 /// <summary>Defines a device-compatible operation that processes buffer elements by reference.</summary>
 /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
-/// <remarks>Implement this interface in a public value type containing GPU views and supported values.</remarks>
+/// <remarks>Implement this interface in a public value type containing GPU views and supported values.
+/// State and elements use their native ILGPU representation; ordinary lambda value conversion and
+/// deferred-error handling do not apply.</remarks>
 public interface IGpuForEachKernel<T> where T : unmanaged
 {
     /// <summary>Processes one element and writes changes through its reference.</summary>

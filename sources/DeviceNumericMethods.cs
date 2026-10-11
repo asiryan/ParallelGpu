@@ -49,7 +49,7 @@ internal static class DeviceNumericMethods
             return true;
         if (type != floating)
             return false;
-        // Use the native subset available without optional Algorithms or a configured CUDA LibDevice.
+        // This native subset needs neither Algorithms lowering nor a configured CUDA LibDevice.
         return info.Name switch
         {
             nameof(Math.Abs) or nameof(Math.Ceiling) or nameof(Math.Floor) or nameof(Math.Sqrt) => Matches(info, 1),

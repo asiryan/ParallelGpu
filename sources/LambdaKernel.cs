@@ -11,7 +11,7 @@ namespace ParallelGpu;
 /// rebuilt for every invocation.</remarks>
 internal sealed class LambdaKernel
 {
-    /// <summary>Bounds temporary safe-reference storage without restricting the total loop extent.</summary>
+    /// <summary>The target budget for temporary safe-reference storage in one launch.</summary>
     private const int MaximumScratchBytes = 16 * 1024 * 1024;
     /// <summary>Persistent translated bodies shared by executors; no closures or accelerator resources are retained.</summary>
     private static readonly ConcurrentDictionary<MethodInfo, Lazy<TranslatedBody>> translatedBodies = new();
@@ -28,6 +28,7 @@ internal sealed class LambdaKernel
     private readonly LoopCapture[] captures;
     /// <summary>The accelerator-bound launcher accepting an iteration count, lower bound, and boxed state.</summary>
     private readonly Action<int, int, object> launch;
+    /// <summary>The largest mapped element size needed for a deferred invalid reference.</summary>
     private readonly int scratchElementSize;
 
     /// <summary>Stores the generated state type, capture mappings, and bound kernel launcher.</summary>
@@ -147,7 +148,7 @@ internal sealed class LambdaKernel
     /// <summary>Rewrites a managed loop into a persistent template shared across accelerators.</summary>
     /// <param name="source">The original ordinary loop method.</param>
     /// <returns>The generated state, capture paths, and entry point.</returns>
-    /// <remarks>ILGPU CPU code can outlive an executor during finalization. Keeping the source assembly
+    /// <remarks>ILGPU CPU code can outlive an executor during finalization. Keeping the generated assembly
     /// noncollectible avoids invalid dynamic-method handles; one template is generated per body method.</remarks>
     private static TranslatedBody TranslateBody(MethodInfo source)
     {
@@ -356,9 +357,9 @@ internal sealed class LambdaKernel
     private static bool IsCaptureType(Type type) => IsScalar(type) ||
         CapturedCollection.ElementType(type) is not null;
 
-    /// <summary>Checks whether a type can be used as a numeric or simple scalar value.</summary>
+    /// <summary>Checks whether a type is a supported value or an explicitly owned native device view.</summary>
     /// <param name="type">The candidate scalar type.</param>
-    /// <returns>True for supported primitives, enums, and structures without managed references.</returns>
+    /// <returns>True for supported values, native append or graph views, or the execution context.</returns>
     private static bool IsScalar(Type type) => CapturedCollection.IsSupportedElementType(type) || DeviceNativeTypes.IsSupported(type);
 
     /// <summary>Maps captured Boolean and character scalars to blittable kernel argument fields.</summary>
@@ -438,6 +439,10 @@ internal sealed class LambdaKernel
         return true;
     }
 
+    /// <summary>Finds the largest mapped element referenced by a body, its helpers, or value constructors.</summary>
+    /// <param name="method">The method whose instructions are inspected.</param>
+    /// <param name="visited">Methods already inspected in this traversal.</param>
+    /// <returns>The required scratch element size in bytes, or zero when no supported element references are found.</returns>
     private static int ScratchElementSize(MethodBase method, HashSet<MethodBase> visited)
     {
         if (!visited.Add(method) || method.GetMethodBody() is null || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)

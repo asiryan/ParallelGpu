@@ -6,7 +6,8 @@ namespace ParallelGpu;
 /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
 /// <remarks>Concurrent appends reserve distinct slots atomically. Their order is unspecified.
 /// Read the output on the host only after the kernel has completed. Lambda captures validate ownership
-/// and lifetime before launching. Explicit value kernels must use views with their owning executor
+/// and lifetime before launching and require a public payload that needs no automatic value conversion.
+/// Explicit value kernels must use views with their owning executor
 /// and within their owner's lifetime.</remarks>
 public readonly struct GpuAppendView<T> : IDeviceNativeView where T : unmanaged
 {
@@ -106,6 +107,7 @@ public sealed class GpuAppendBuffer<T> : IDisposable where T : unmanaged
     public int Capacity => values.Length;
 
     /// <summary>Gets a device view for kernels executed by the owning executor.</summary>
+    /// <remarks>The view does not own memory and must not outlive the buffer or executor.</remarks>
     /// <exception cref="ObjectDisposedException">The buffer or executor has been disposed.</exception>
     public GpuAppendView<T> View
     {
@@ -205,7 +207,9 @@ public sealed class GpuAppendBuffer<T> : IDisposable where T : unmanaged
 /// <summary>Produces a variable number of output values per indexed iteration.</summary>
 /// <typeparam name="T">The unmanaged, ILGPU-supported output type.</typeparam>
 /// <remarks>Implementations must be public value types with device-compatible state.
-/// Values can be newly constructed structures; storage is reserved from a fixed-capacity host allocation.</remarks>
+/// Values can be newly constructed structures; storage is reserved from a fixed-capacity host allocation.
+/// State and output use their native ILGPU representation; ordinary lambda conversion and deferred-error
+/// handling do not apply.</remarks>
 public interface IGpuCollectKernel<T> where T : unmanaged
 {
     /// <summary>Processes an index and appends zero or more output values.</summary>

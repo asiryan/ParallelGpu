@@ -1,6 +1,6 @@
 namespace ParallelGpu;
 
-/// <summary>Recognizes explicit device views and the device execution context.</summary>
+/// <summary>Recognizes native append and object-graph views and the device execution context.</summary>
 internal static class DeviceNativeTypes
 {
     internal static bool IsSupported(Type type) => type == typeof(DeviceExecutionContext) ||
@@ -8,6 +8,8 @@ internal static class DeviceNativeTypes
             type.GetGenericTypeDefinition() == typeof(GpuObjectGraphView<>));
 
     /// <summary>Checks that lambda value mapping cannot change an explicitly allocated native payload.</summary>
+    /// <param name="type">A recognized native view or execution-context type.</param>
+    /// <exception cref="NotSupportedException">A view payload is unsupported, not publicly visible, or requires value conversion.</exception>
     internal static void Validate(Type type)
     {
         if (!type.IsGenericType)

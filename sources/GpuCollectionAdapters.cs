@@ -7,7 +7,10 @@ namespace ParallelGpu;
 
 /// <summary>Registers host-only snapshots for custom indexed collections used in ordinary GPU loops.</summary>
 /// <remarks>Register before GPU compilation first inspects the type. Each type can be registered once.
-/// GPU bodies can use its integer indexer and Count or Length property; adapter callbacks run on the host.</remarks>
+/// GPU bodies can use its integer indexer (including inherited or renamed indexers) and Count or Length
+/// property. Device lengths come from the snapshot's Count; adapter callbacks run on the host.
+/// Registered list subclasses use adapters when captured through their registered declaration;
+/// List, IList, and IReadOnlyList declarations use native array or list storage.</remarks>
 public static class GpuCollectionAdapters
 {
     private sealed record Adapter(Type Element, Func<object, object> Capture);
@@ -47,6 +50,7 @@ public static class GpuCollectionAdapters
         }
     }
 
+    /// <summary>Resolves a built-in slice or registered element type, freezing custom type registration.</summary>
     internal static Type? ElementType(Type type)
     {
         var builtin = BuiltinElement(type);
@@ -59,6 +63,7 @@ public static class GpuCollectionAdapters
         }
     }
 
+    /// <summary>Checks whether a runtime type is a built-in slice or matches a registered adapter.</summary>
     internal static bool SupportsRuntime(Type type) => BuiltinElement(type) is not null ||
         adapters.Keys.Any(candidate => candidate.IsAssignableFrom(type));
 
@@ -98,6 +103,7 @@ public static class GpuCollectionAdapters
             candidate.DeclaringType == method.DeclaringType;
     }
 
+    /// <summary>Finds the element type of built-in segment, memory, and span representations.</summary>
     private static Type? BuiltinElement(Type type)
     {
         if (!type.IsGenericType)
@@ -108,6 +114,7 @@ public static class GpuCollectionAdapters
             ? type.GetGenericArguments()[0] : null;
     }
 
+    /// <summary>Captures built-in slices or adapted storage while reusing buffers for shared storage identities.</summary>
     internal static bool TryCapture<T>(object source, Dictionary<object, object> snapshots, out GpuCollectionSnapshot<T> snapshot)
     {
         switch (source)
@@ -157,6 +164,7 @@ public static class GpuCollectionAdapters
         return true;
     }
 
+    /// <summary>Finds the most specific assignable adapter with the requested element type, rejecting ambiguity.</summary>
     private static Adapter? FindAdapter(Type runtime, Type element)
     {
         if (adapters.TryGetValue(runtime, out var direct) && direct.Element == element)
@@ -178,6 +186,7 @@ public static class GpuCollectionAdapters
         return null;
     }
 
+    /// <summary>Shares array storage or stages a full memory owner while retaining slice offsets and read-only access.</summary>
     private static GpuCollectionSnapshot<T> CaptureMemory<T>(ReadOnlyMemory<T> memory, bool readOnly,
         Dictionary<object, object> snapshots)
     {

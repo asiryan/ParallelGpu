@@ -12,11 +12,13 @@ public sealed partial class Gpu
     /// <returns>A reusable graph whose device view preserves null, shared references, and cycles.</returns>
     /// <remarks>Capacity is allocated on the host. Device creation uses separate atomic reservations for
     /// record and reference pools. The adapter creates host objects only when CopyToHost is called.
-    /// Graph traversal preserves reference identity.</remarks>
+    /// Graph traversal preserves reference identity. Device payloads use their native representation,
+    /// and host changes are applied only by an explicit CopyToHost call.</remarks>
     /// <exception cref="ArgumentNullException">The roots or adapter is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A capacity is below -1 or too small for the existing graph.</exception>
     /// <exception cref="ArgumentException">The record type is not publicly visible.</exception>
     /// <exception cref="InvalidOperationException">The adapter returns null reference lists or the graph is too large.</exception>
+    /// <exception cref="NotSupportedException">The record contains inline arrays or fixed-buffer storage.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public GpuObjectGraph<TObject, TRecord> UploadObjectGraph<TObject, TRecord>(
         IReadOnlyList<TObject?> roots, IGpuObjectGraphAdapter<TObject, TRecord> adapter,

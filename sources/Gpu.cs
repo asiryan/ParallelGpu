@@ -75,7 +75,9 @@ public sealed partial class Gpu : IDisposable
     /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
     /// <param name="length">The number of elements to allocate; zero is allowed.</param>
     /// <returns>A buffer that the caller can dispose independently of the executor.</returns>
+    /// <remarks>Storage uses the native ILGPU representation of T; automatic value mappings are not applied.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">The length is negative.</exception>
+    /// <exception cref="NotSupportedException">The element type contains inline arrays or fixed buffers.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public GpuBuffer<T> Allocate<T>(int length) where T : unmanaged => AllocateCore<T>(length, clear: true);
 
@@ -120,7 +122,9 @@ public sealed partial class Gpu : IDisposable
     /// <typeparam name="T">The unmanaged, ILGPU-supported element type.</typeparam>
     /// <param name="data">The host array to copy. The array is not retained by the buffer.</param>
     /// <returns>A device buffer containing the uploaded data.</returns>
+    /// <remarks>Storage uses the native ILGPU representation of T; automatic value mappings are not applied.</remarks>
     /// <exception cref="ArgumentNullException">The data array is null.</exception>
+    /// <exception cref="NotSupportedException">The element type contains inline arrays or fixed buffers.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public GpuBuffer<T> Upload<T>(T[] data) where T : unmanaged
     {
@@ -148,7 +152,8 @@ public sealed partial class Gpu : IDisposable
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="kernel">The operation and its device-compatible state.</param>
     /// <remarks>Empty and reversed ranges do nothing. Iterations are unordered;
-    /// shared writes require device synchronization or atomics.</remarks>
+    /// shared writes require device synchronization or atomics. Automatic lambda translation,
+    /// value mappings, and deferred error checks are not applied to explicit value kernels.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
     /// <exception cref="ArgumentException">The kernel type is not publicly visible.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
@@ -183,7 +188,8 @@ public sealed partial class Gpu : IDisposable
     /// <typeparam name="TKernel">A public value type implementing <see cref="IGpuForEachKernel{T}"/>.</typeparam>
     /// <param name="buffer">A live buffer owned by this executor.</param>
     /// <param name="kernel">The operation and its device-compatible state.</param>
-    /// <remarks>The call waits for completion and does not copy the buffer back to the host.</remarks>
+    /// <remarks>The call waits for completion and does not copy the buffer back to the host.
+    /// Explicit value kernels use native ILGPU types and execution contracts, without automatic value mappings or deferred error checks.</remarks>
     /// <exception cref="ArgumentNullException">The buffer is null.</exception>
     /// <exception cref="ArgumentException">The buffer belongs to another executor, or a kernel or element type is not public.</exception>
     /// <exception cref="ObjectDisposedException">The executor or buffer has been disposed.</exception>
@@ -223,6 +229,7 @@ public sealed partial class Gpu : IDisposable
     /// <remarks>Use the buffer overload to retain data on the device between operations.</remarks>
     /// <exception cref="ArgumentNullException">The data array is null.</exception>
     /// <exception cref="ArgumentException">A kernel or element type is not publicly visible.</exception>
+    /// <exception cref="NotSupportedException">The element type contains inline arrays or fixed buffers.</exception>
     /// <exception cref="ObjectDisposedException">The executor has been disposed.</exception>
     public void ForEach<T, TKernel>(T[] data, TKernel kernel)
         where T : unmanaged

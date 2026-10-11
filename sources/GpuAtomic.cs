@@ -7,7 +7,9 @@ namespace ParallelGpu;
 /// <remarks>Targets must refer to device memory shared by the participating iterations, such as an array
 /// element. Ordinary captured scalars are read-only. Atomics order accesses to their target; they do not
 /// publish a surrounding object graph or turn unrelated reads and writes into a transaction.
-/// Floating-point updates follow thread arrival order and can vary between runs.</remarks>
+/// Floating-point updates follow thread arrival order and can vary between runs. Operations delegate to ILGPU;
+/// in ILGPU 1.5.3, floating-point Add/Min/Max with a NaN target may hang on CPU, and CUDA Min/Max may
+/// return an incorrect previous value for a NaN target.</remarks>
 public static class GpuAtomic
 {
     /// <summary>Atomically adds a value to the target and returns its previous value.</summary>
@@ -186,7 +188,7 @@ public static class GpuAtomic
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Exchange(ref float target, float value) => Atomic.Exchange(ref target, value);
 
-    /// <summary>Atomically replaces the target when it equals the comparison value.</summary>
+    /// <summary>Atomically replaces the target when its bits match the comparison value's bits.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The replacement value.</param>
     /// <param name="comparand">The expected target value.</param>
@@ -223,7 +225,7 @@ public static class GpuAtomic
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static double Exchange(ref double target, double value) => Atomic.Exchange(ref target, value);
 
-    /// <summary>Atomically replaces the target when it equals the comparison value.</summary>
+    /// <summary>Atomically replaces the target when its bits match the comparison value's bits.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The replacement value.</param>
     /// <param name="comparand">The expected target value.</param>

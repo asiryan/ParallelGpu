@@ -3,9 +3,11 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Rejects unsupported managed effects before they reach the device compiler.</summary>
+/// <summary>Validates helper signatures and rejects unsupported IL instructions and static captures.</summary>
 internal static class DeviceInstructionValidation
 {
+    /// <summary>Rejects checked arithmetic and instructions requiring managed runtime behavior.</summary>
+    /// <param name="instruction">The original loop or helper instruction.</param>
     internal static void Validate(LoopInstruction instruction)
     {
         var code = instruction.Code;
@@ -19,6 +21,9 @@ internal static class DeviceInstructionValidation
             throw new NotSupportedException($"Instruction '{code.Name}' requires managed runtime behavior inside a GPU helper. Use explicit GPU storage and device-compatible value operations.");
     }
 
+    /// <summary>Validates transitive helper calls, leaving recognized framework and ILGPU operations to their translators.</summary>
+    /// <param name="method">The method or constructor to inspect.</param>
+    /// <param name="visited">The methods already inspected, including recursive references.</param>
     internal static void ValidateCallGraph(MethodBase method, HashSet<MethodBase> visited)
     {
         if (!visited.Add(method) || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)

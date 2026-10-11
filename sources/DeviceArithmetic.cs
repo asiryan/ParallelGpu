@@ -3,7 +3,9 @@ using System.Reflection.Emit;
 
 namespace ParallelGpu;
 
-/// <summary>Provides guarded integer arithmetic and portable floating-point operations.</summary>
+/// <summary>Provides integer failure guards, bit-based floating remainder and CopySign, and NaN-aware extrema.</summary>
+/// <remarks>Guards defer integer division-by-zero and signed overflow errors; evaluation of valid arithmetic
+/// still follows ILGPU backend behavior, including CUDA constant-division optimizations.</remarks>
 internal static class DeviceArithmetic
 {
     internal static bool IsDivision(OpCode code) => code == OpCodes.Div || code == OpCodes.Div_Un ||

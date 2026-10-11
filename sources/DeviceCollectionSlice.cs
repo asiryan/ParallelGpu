@@ -93,7 +93,7 @@ internal static class DeviceCollectionSlice
         return Indexed(Slice(collection, start, length));
     }
 
-    /// <summary>Creates a segment slice continuing to the end of its backing region.</summary>
+    /// <summary>Creates a segment slice continuing to the end of the current segment.</summary>
     public static DeviceCollection SegmentSliceFrom(DeviceCollection collection, int start) =>
         SegmentSlice(collection, start, Count(collection) - start);
 
@@ -101,7 +101,7 @@ internal static class DeviceCollectionSlice
     public static DeviceCollection Indexed(DeviceCollection collection) =>
         collection.IndexErrorCode == 9 ? collection : WithIndexError(collection, 9);
 
-    /// <summary>Reads a List or list-interface indexer without changing its null semantics.</summary>
+    /// <summary>Reads a list-interface indexer, retaining null-reference and default-segment errors.</summary>
     public static T ReadIndexed<T>(DeviceCollection collection, int index) where T : unmanaged
     {
         if (collection.Identity != 0 && collection.ElementSize == 0)
@@ -112,7 +112,7 @@ internal static class DeviceCollectionSlice
         return DeviceCollection.Read<T>(Indexed(collection), index);
     }
 
-    /// <summary>Writes a List or list-interface indexer without changing its null semantics.</summary>
+    /// <summary>Writes a list-interface indexer, retaining null-reference and default-segment errors.</summary>
     public static void WriteIndexed<T>(DeviceCollection collection, int index, T value) where T : unmanaged
     {
         if (collection.Identity != 0 && collection.ElementSize == 0)

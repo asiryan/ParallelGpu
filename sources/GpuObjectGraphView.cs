@@ -9,7 +9,8 @@ namespace ParallelGpu;
 /// read only in a later kernel, after their creating kernel has completed. Concurrent changes to
 /// the same payload, reference slot, or root still require synchronization by the caller.
 /// Invalid references and capacity exhaustion are recorded and rejected on host download. Lambda
-/// captures validate ownership and lifetime before launch. Views in explicit value kernels must
+/// captures validate ownership and lifetime before launch and require a public payload that needs no
+/// automatic value conversion. Views in explicit value kernels must
 /// not outlive their graph and must be used only by its owning executor.</remarks>
 public readonly struct GpuObjectGraphView<TRecord> : IDeviceNativeView where TRecord : unmanaged
 {

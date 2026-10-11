@@ -11,8 +11,8 @@ internal readonly struct DeviceExecutionContext
     /// <summary>Creates the context for a single invocation.</summary>
     /// <param name="errors">The single-element error buffer.</param>
     /// <param name="scratch">Per-iteration storage used after an invalid ref access.</param>
-    /// <param name="scratchStride">Bytes allocated for each iteration.</param>
-    /// <param name="threadIndex">The zero-based iteration owning this context.</param>
+    /// <param name="scratchStride">Aligned bytes reserved for each iteration in the current launch.</param>
+    /// <param name="threadIndex">The zero-based iteration within the current launch.</param>
     public DeviceExecutionContext(ArrayView<int> errors, ArrayView<byte> scratch = default, int scratchStride = 0, int threadIndex = 0)
     {
         Errors = errors;
@@ -21,18 +21,31 @@ internal readonly struct DeviceExecutionContext
         ThreadIndex = threadIndex;
     }
 
+    /// <summary>The current launch's storage for references returned after invalid collection access.</summary>
     public readonly ArrayView<byte> Scratch;
+    /// <summary>The aligned scratch allocation size per iteration in bytes.</summary>
     public readonly int ScratchStride;
+    /// <summary>The zero-based iteration within the current launch.</summary>
     public readonly int ThreadIndex;
 
+    /// <summary>Shares the invocation's error buffer and launch scratch with a particular iteration.</summary>
+    /// <param name="context">The invocation context.</param>
+    /// <param name="threadIndex">The zero-based iteration within the current launch.</param>
+    /// <returns>The iteration's context.</returns>
     public static DeviceExecutionContext WithThread(DeviceExecutionContext context, int threadIndex) =>
         new(context.Errors, context.Scratch, context.ScratchStride, threadIndex);
 
+    /// <summary>Returns this iteration's scratch reference after an access has recorded a deferred failure.</summary>
+    /// <typeparam name="T">The device element type used by the failed access.</typeparam>
+    /// <returns>A reference to temporary storage whose writes are never copied back.</returns>
+    /// <remarks>The compiler must reserve a stride large enough for T. Failed accesses in the same iteration
+    /// reuse this storage; its contents are not a substitute for a valid collection element.</remarks>
     public ref T ScratchAddress<T>() where T : unmanaged =>
         ref Scratch.SubView((long)ThreadIndex * ScratchStride, ScratchStride).Cast<T>()[0];
 
-    /// <summary>Records the first failure without throwing inside a device kernel.</summary>
+    /// <summary>Atomically records one failure without throwing inside a device kernel.</summary>
     /// <param name="code">The host exception category reported by the validated collection or numeric operation.</param>
+    /// <remarks>The first successful update wins; concurrent failures have no guaranteed iteration order.</remarks>
     public void Fail(int code)
     {
         if (Errors.Length > 0)

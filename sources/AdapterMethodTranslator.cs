@@ -7,6 +7,7 @@ namespace ParallelGpu;
 /// <summary>Maps built-in memory views and registered integer indexers to contiguous GPU descriptors.</summary>
 internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
 {
+    /// <summary>Generated accessors keyed by the member and effective receiver type, including inherited indexers.</summary>
     private readonly Dictionary<(MethodBase Method, Type? Receiver), MethodInfo> methods = new();
     private static readonly ConcurrentDictionary<ConstructorInfo, bool> nullSegmentConstructors = new();
 
