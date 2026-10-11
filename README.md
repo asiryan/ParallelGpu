@@ -1,3 +1,5 @@
+<p align="center"><img width="15%" src="docs/logo.png" /></p>  
+
 # ParallelGpu
 
 Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write an ordinary lambda; the library compiles it, transfers captured collections, and copies results back before returning.
