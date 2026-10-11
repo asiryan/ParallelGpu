@@ -1,12 +1,18 @@
 <p align="center"><img width="45%" src="docs/logo_big.png" /></p>  
 
-# About
-
 Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write an ordinary lambda; the library compiles it, transfers captured collections, and copies results back before returning.
 
-The library targets .NET Standard 2.1. Build the solution and samples with the .NET 8 SDK. Reference `sources/ParallelGpu.csproj` from your application.
+# Version
 
-## Quick start
+Build **ParallelGpu** from source or install the NuGet package in your project.
+
+| Assembly | Specification | OS | Download | Package |
+|-------------|:-------------:|:-------------:|:--------------:|:--------------:|
+| [ParallelGpu](sources) | .NET Standard 2.1 | Cross-platform | [Release](https://github.com/asiryan/ParallelGpu/releases/) | [NuGet](https://www.nuget.org/packages/ParallelGpu/) | 
+
+The NuGet package contains the library.
+
+# Quick start
 
 ```csharp
 using System;
