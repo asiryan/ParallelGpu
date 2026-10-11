@@ -120,10 +120,12 @@ internal sealed class CapturedCollection<T> : CapturedCollection
             case List<T> list:
                 if (list.Count != Snapshot.Length)
                     throw new InvalidOperationException("A captured list changed length while the loop was running.");
+                values.CopyTo(Snapshot);
                 for (int i = 0; i < values.Length; i++)
                     list[i] = values[i];
                 break;
             case Array array when array.Length > 0:
+                values.CopyTo(Snapshot);
                 values.CopyTo(MemoryMarshal.CreateSpan(ref First(array), array.Length));
                 break;
         }

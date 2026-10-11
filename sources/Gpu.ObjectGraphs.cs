@@ -35,6 +35,7 @@ public sealed partial class Gpu
         {
             ThrowIfDisposed();
             ValidateVisible(typeof(TRecord));
+            DeviceValueType.ValidateStorage(typeof(TRecord));
             var objects = new List<TObject>();
             var identities = new Dictionary<object, int>(ReferenceIdentityComparer.Instance);
             int Register(TObject? value)

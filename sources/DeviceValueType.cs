@@ -11,6 +11,8 @@ internal static class DeviceValueType
 {
     /// <summary>Cached structural checks shared by compilation and collection registration.</summary>
     private static readonly ConcurrentDictionary<Type, bool> supported = new();
+    /// <summary>Recognizes values whose implicit array storage cannot be represented by reflected fields.</summary>
+    private static readonly ConcurrentDictionary<Type, bool> hiddenStorage = new();
     /// <summary>Host structures mapped to their device mirrors and field correspondences.</summary>
     private static readonly Dictionary<Type, (Type Type, Dictionary<FieldInfo, FieldInfo> Fields)> mappings = new();
     /// <summary>Serializes creation of mirrors shared by different executors.</summary>
@@ -39,8 +41,26 @@ internal static class DeviceValueType
         if (candidate.IsPrimitive)
             return candidate != typeof(IntPtr) && candidate != typeof(UIntPtr);
         return candidate != typeof(void) && candidate.IsValueType && !candidate.IsByRefLike &&
-            !candidate.IsExplicitLayout && Fields(candidate).All(field => IsSupported(field.FieldType));
+            !candidate.IsExplicitLayout && !HasHiddenStorage(candidate) &&
+            Fields(candidate).All(field => IsSupported(field.FieldType));
     });
+
+    /// <summary>Rejects inline arrays and fixed buffers before allocation, conversion, or host callbacks.</summary>
+    /// <param name="type">The original value type, including nested structures.</param>
+    internal static void ValidateStorage(Type type)
+    {
+        if (HasHiddenStorage(type))
+            throw new NotSupportedException($"Inline arrays and fixed buffers are not supported GPU value representations: '{type}'.");
+    }
+
+    /// <summary>Checks metadata without instantiating attributes, including attributes from newer runtimes.</summary>
+    private static bool HasHiddenStorage(Type type) => hiddenStorage.GetOrAdd(type, candidate =>
+        candidate.IsValueType && !candidate.IsPrimitive && !candidate.IsEnum &&
+        (candidate.CustomAttributes.Any(attribute => attribute.AttributeType.FullName is
+            "System.Runtime.CompilerServices.InlineArrayAttribute" or
+            "System.Runtime.CompilerServices.UnsafeValueTypeAttribute") ||
+        Fields(candidate).Any(field => field.CustomAttributes.Any(attribute => attribute.AttributeType.FullName ==
+            "System.Runtime.CompilerServices.FixedBufferAttribute") || HasHiddenStorage(field.FieldType))));
 
     /// <summary>Gets instance fields in their metadata order, including private and readonly fields.</summary>
     /// <param name="type">The structure whose fields are inspected.</param>
@@ -56,6 +76,7 @@ internal static class DeviceValueType
     {
         if (type.IsByRef)
             return MapType(type.GetElementType()!).MakeByRefType();
+        ValidateStorage(type);
         if (type == typeof(char))
             return typeof(ushort);
         if (!IsSupported(type) || type.IsPrimitive || type.IsEnum)
@@ -67,7 +88,7 @@ internal static class DeviceValueType
             var fields = Fields(type);
             var types = fields.Select(field => field.FieldType == typeof(bool)
                 ? typeof(int) : MapType(field.FieldType)).ToArray();
-            if (type.IsVisible && (type.StructLayoutAttribute?.Pack ?? 0) == 0 &&
+            if (type.IsVisible && !type.IsAutoLayout && (type.StructLayoutAttribute?.Pack ?? 0) == 0 &&
                 fields.Select(field => field.FieldType).SequenceEqual(types))
             {
                 mappings.Add(type, (type, fields.ToDictionary(field => field, field => field)));

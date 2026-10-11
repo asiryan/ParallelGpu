@@ -96,12 +96,16 @@ public static class GpuCollectionAdapters
                 snapshot = (GpuCollectionSnapshot<T>)adapter.Capture(source);
                 if (snapshot.Buffer is null || snapshot.Identity is null)
                     throw new InvalidOperationException("A GPU collection adapter returned an uninitialized snapshot.");
-                if (snapshot.Identity is T[] native)
+                if (snapshot.Identity is Array nativeArray)
                 {
-                    if (native.Length != snapshot.Buffer.Length)
-                        throw new InvalidOperationException("An array storage identity must have the same full length as its GPU snapshot.");
-                    snapshot = new(native, snapshot.Offset, snapshot.Count, snapshot.IsReadOnly, snapshot.Commit, native);
+                    if (nativeArray.GetType().GetElementType() != typeof(T) || nativeArray.Length != snapshot.Buffer.Length)
+                        throw new InvalidOperationException("An array storage identity must have the same element type and full buffer length as its GPU snapshot.");
+                    if (nativeArray is T[] native)
+                        snapshot = new(native, snapshot.Offset, snapshot.Count, snapshot.IsReadOnly, snapshot.Commit, native);
                 }
+                else if (ListElement(snapshot.Identity.GetType()) is Type listElement &&
+                    (listElement != typeof(T) || ((List<T>)snapshot.Identity).Count != snapshot.Buffer.Length))
+                    throw new InvalidOperationException("A list storage identity must have the same element type and full buffer length as its GPU snapshot.");
                 if (snapshots.TryGetValue(snapshot.Identity, out var previous))
                 {
                     if (previous is not GpuCollectionSnapshot<T> shared || shared.Buffer.Length != snapshot.Buffer.Length)
@@ -127,6 +131,16 @@ public static class GpuCollectionAdapters
             throw new NotSupportedException($"Runtime collection '{runtime}' matches several unrelated GPU adapters; register its concrete type.");
         return mostSpecific.Length == 1 ? mostSpecific[0].Value : null;
     }
+
+    /// <summary>Finds the native element type of a list storage identity, including derived lists.</summary>
+    private static Type? ListElement(Type type)
+    {
+        for (Type? current = type; current is not null; current = current.BaseType)
+            if (current.IsGenericType && current.GetGenericTypeDefinition() == typeof(List<>))
+                return current.GetGenericArguments()[0];
+        return null;
+    }
+
     private static GpuCollectionSnapshot<T> CaptureMemory<T>(ReadOnlyMemory<T> memory, bool readOnly,
         Dictionary<object, object> snapshots)
     {

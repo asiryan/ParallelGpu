@@ -13,9 +13,10 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>Typed registration delegates shared across invocations to avoid repeated generic reflection.</summary>
     private static readonly ConcurrentDictionary<Type, Func<CollectionTransfers, object, CapturedCollection>>
         factories = new();
-    /// <summary>Host collection wrappers keyed by reference identity so repeated captures share one device view.</summary>
-    private readonly Dictionary<object, CapturedCollection> collections =
-        new(ReferenceIdentityComparer.Instance);
+    /// <summary>Host wrappers grouped by element type and reference identity so distinct typed adapters retain their storage.</summary>
+    private readonly Dictionary<Type, Dictionary<object, CapturedCollection>> collections = new();
+    /// <summary>Reference identities shared by all typed representations of the same host object.</summary>
+    private readonly Dictionary<object, int> identities = new(ReferenceIdentityComparer.Instance);
     /// <summary>Shared staged snapshots keyed by their host storage identities.</summary>
     private readonly Dictionary<object, object> adapterSnapshots = new(ReferenceIdentityComparer.Instance);
     /// <summary>One host commit per storage identity, retaining its shared backing leaf write flag.</summary>
@@ -79,14 +80,27 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <returns>The shared wrapper for the source object's identity.</returns>
     internal CapturedCollection Add<T>(object source)
     {
-        // Jagged rows and independently captured arrays must resolve to the same leaf slice.
-        if (collections.TryGetValue(source, out var existing))
+        if (!collections.TryGetValue(typeof(T), out var typedCollections))
+        {
+            typedCollections = new(ReferenceIdentityComparer.Instance);
+            collections.Add(typeof(T), typedCollections);
+        }
+        // An object may expose several registered indexers with independent element types.
+        if (typedCollections.TryGetValue(source, out var existing))
             return existing;
         CapturedCollection collection;
         if (source is not Array && source is not List<T> &&
             GpuCollectionAdapters.TryCapture<T>(source, adapterSnapshots, out var snapshot))
         {
-            var backing = (CapturedCollection<T>)Add<T>(snapshot.Buffer);
+            var backing = (CapturedCollection<T>)Add<T>(snapshot.Identity is Array || snapshot.Identity is List<T>
+                ? snapshot.Identity : snapshot.Buffer);
+            if (snapshot.Identity is Array || snapshot.Identity is List<T>)
+            {
+                // Native storage and its staged adapters must share one leaf regardless of capture order.
+                snapshot = new(backing.Snapshot, snapshot.Offset, snapshot.Count, snapshot.IsReadOnly,
+                    snapshot.Commit, snapshot.Identity);
+                adapterSnapshots[snapshot.Identity] = snapshot;
+            }
             collection = new CapturedSliceCollection<T>(this, backing, snapshot,
                 arraySegment: source is ArraySegment<T>,
                 nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null);
@@ -97,8 +111,13 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             collection = source is Array nested && nested.GetType().GetElementType()!.IsArray
                 ? new CapturedJaggedCollection<T>(this, nested)
                 : new CapturedCollection<T>(this, source);
-        collection.Identity = checked(nextIdentity++);
-        collections.Add(source, collection);
+        if (!identities.TryGetValue(source, out int identity))
+        {
+            identity = checked(nextIdentity++);
+            identities.Add(source, identity);
+        }
+        collection.Identity = identity;
+        typedCollections.Add(source, collection);
         return collection;
     }
 

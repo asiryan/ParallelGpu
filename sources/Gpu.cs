@@ -97,6 +97,7 @@ public sealed partial class Gpu : IDisposable
         lock (SyncRoot)
         {
             ThrowIfDisposed();
+            DeviceValueType.ValidateStorage(typeof(T));
             var memory = accelerator.Allocate1D<T>(length);
             try
             {

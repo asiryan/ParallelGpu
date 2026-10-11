@@ -77,8 +77,7 @@ internal sealed class LambdaKernel
                     "Use the non-generic For overload for mixed collection types.", nameof(body));
             if (capture.Element is not null && values[i] is not null && values[i] is not Array &&
                 !GpuCollectionAdapters.SupportsRuntime(values[i]!.GetType()) &&
-                (!values[i]!.GetType().IsGenericType ||
-                 values[i]!.GetType().GetGenericTypeDefinition() != typeof(List<>)))
+                !typeof(List<>).MakeGenericType(capture.Element).IsInstanceOfType(values[i]))
                 throw new NotSupportedException(
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
         }
