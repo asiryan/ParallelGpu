@@ -1,8 +1,6 @@
 # ParallelGpu
 
-Synchronous C# loops on CUDA or OpenCL, powered by ILGPU. Write a lambda over captured collections; the library compiles it for the selected device, transfers the data, and copies results back before the call returns.
-
-The library targets .NET Standard 2.1 and uses ILGPU 1.5.3.
+Synchronous C# loops on [CUDA](https://developer.nvidia.com/cuda) or [OpenCL](https://www.khronos.org/opencl/), powered by [ILGPU](https://ilgpu.net). Write a lambda over captured collections; the library compiles it for the selected device, transfers the data, and copies results back before the call returns.
 
 ## Installation
 
