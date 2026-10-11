@@ -99,9 +99,14 @@ internal static class ReadOnlyCapture
         _ => (int)instruction.Operand!
     };
 
-    private static bool IsCollectionMember(MethodInfo method) =>
-        CapturedCollection.ElementType(method.DeclaringType!) is not null &&
-        method.Name is "get_Item" or "set_Item" or "get_Count" or "get_Length" or "get_Span" or "get_IsEmpty" or "Slice";
+    private static bool IsCollectionMember(MethodInfo method)
+    {
+        var element = CapturedCollection.ElementType(method.DeclaringType!);
+        return element is not null &&
+            (GpuCollectionAdapters.AccessorOperation(method.DeclaringType!, method, element) is not null ||
+                method.Name is "get_Item" or "set_Item" or "get_Count" or "get_Length" or
+                    "get_Span" or "get_IsEmpty" or "Slice");
+    }
     /// <summary>Pops a tracked reference, treating stack values below the capture as unrelated.</summary>
     /// <param name="stack">The tracked suffix of the evaluation stack.</param>
     /// <returns>True if the popped value is derived from the capture address.</returns>

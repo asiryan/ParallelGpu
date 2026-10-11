@@ -7,13 +7,17 @@ namespace ParallelGpu;
 /// <summary>Maps built-in memory views and registered integer indexers to contiguous GPU descriptors.</summary>
 internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
 {
-    private readonly Dictionary<MethodBase, MethodInfo> methods = new();
+    private readonly Dictionary<(MethodBase Method, Type? Receiver), MethodInfo> methods = new();
     private static readonly ConcurrentDictionary<ConstructorInfo, bool> nullSegmentConstructors = new();
 
-    internal bool TryEmit(ILGenerator il, MethodInfo method)
+    internal bool TryEmit(ILGenerator il, MethodInfo method, Type? receiverType = null)
     {
         var declaring = method.DeclaringType!;
-        Type? element = GpuCollectionAdapters.ElementType(declaring);
+        if (receiverType?.IsByRef == true)
+            receiverType = receiverType.GetElementType();
+        var collectionType = receiverType is not null &&
+            GpuCollectionAdapters.ElementType(receiverType) is not null ? receiverType : declaring;
+        Type? element = GpuCollectionAdapters.ElementType(collectionType);
         bool extension = declaring == typeof(MemoryExtensions) && method.IsGenericMethod &&
             method.Name is "AsSpan" or "AsMemory";
         if (extension)
@@ -28,8 +32,8 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         if ((extension && method.GetParameters().Skip(1).Any(parameter => parameter.ParameterType != typeof(int))) ||
             (method.Name == "Slice" && method.GetParameters().Any(parameter => parameter.ParameterType != typeof(int))))
             throw new NotSupportedException("GPU memory slicing requires integer start and length arguments; Index and Range overloads are unsupported.");
-        if (!methods.TryGetValue(method, out var replacement))
-            replacement = Translate(method, element, extension);
+        if (!methods.TryGetValue((method, collectionType), out var replacement))
+            replacement = Translate(method, element, extension, collectionType);
         il.Emit(OpCodes.Call, replacement);
         return true;
     }
@@ -43,12 +47,12 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
             constructor.GetParameters().Any(parameter => parameter.ParameterType != typeof(int) &&
                 CapturedCollection.ElementType(parameter.ParameterType) is null))
             throw new NotSupportedException($"Memory constructor '{constructor}' cannot be translated to contiguous GPU storage.");
-        if (!methods.TryGetValue(constructor, out var replacement))
+        if (!methods.TryGetValue((constructor, null), out var replacement))
         {
             var parameters = constructor.GetParameters().Select(parameter => ScalarMethodTranslator.MapType(parameter.ParameterType)).ToArray();
             replacement = helpers.DefineMethod("ViewConstructor" + methods.Count,
                 MethodAttributes.Public | MethodAttributes.Static, typeof(DeviceCollection), parameters);
-            methods.Add(constructor, replacement);
+            methods.Add((constructor, null), replacement);
             var body = ((MethodBuilder)replacement).GetILGenerator();
             body.Emit(OpCodes.Ldarg_0);
             if (IsSegment(type))
@@ -88,9 +92,13 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         return true;
     }
 
-    private MethodInfo Translate(MethodInfo method, Type element, bool extension)
+    private MethodInfo Translate(MethodInfo method, Type element, bool extension, Type collectionType)
     {
         var declaring = method.DeclaringType!;
+        var operation = GpuCollectionAdapters.AccessorOperation(collectionType, method, element);
+        if (operation is null && !extension && !IsValueView(collectionType))
+            throw new NotSupportedException($"Collection adapter operation '{declaring.FullName}.{method.Name}' is unsupported inside GPU loops. Use its integer indexer or length.");
+        operation ??= method.Name;
         bool valueReceiver = !method.IsStatic && declaring.IsValueType;
         var parameters = method.GetParameters().Select(parameter => ScalarMethodTranslator.MapType(parameter.ParameterType)).ToList();
         if (!method.IsStatic)
@@ -98,7 +106,7 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         var result = ScalarMethodTranslator.MapType(method.ReturnType);
         var builder = helpers.DefineMethod("ViewMethod" + methods.Count,
             MethodAttributes.Public | MethodAttributes.Static, result, parameters.ToArray());
-        methods.Add(method, builder);
+        methods.Add((method, collectionType), builder);
         var il = builder.GetILGenerator();
         il.Emit(OpCodes.Ldarg_0);
         if (valueReceiver)
@@ -110,12 +118,12 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
                 ? nameof(DeviceCollectionSlice.ReadOnly) : IsSegment(method.ReturnType)
                     ? nameof(DeviceCollectionSlice.Segment) : nameof(DeviceCollectionSlice.Normalize)));
         }
-        else if (method.Name is "get_Count" or "get_Length")
+        else if (operation is "get_Count" or "get_Length")
             il.Emit(OpCodes.Call, valueReceiver ? SliceMethod(nameof(DeviceCollectionSlice.Count))
                 : typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.Count))!);
-        else if (method.Name == "get_IsEmpty")
+        else if (operation == "get_IsEmpty")
             il.Emit(OpCodes.Call, SliceMethod(nameof(DeviceCollectionSlice.IsEmpty)));
-        else if (method.Name == "get_Item")
+        else if (operation == "get_Item")
         {
             if (method.GetParameters().Length != 1 || method.GetParameters()[0].ParameterType != typeof(int))
                 throw new NotSupportedException("GPU collection adapters require an integer indexer.");
@@ -127,7 +135,7 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
                 ? IsReadOnly(declaring) ? nameof(DeviceCollection.ReadOnlyAddress) : nameof(DeviceCollection.Address)
                 : nameof(DeviceCollection.Read))!.MakeGenericMethod(DeviceValueType.MapType(element)));
         }
-        else if (method.Name == "set_Item")
+        else if (operation == "set_Item")
         {
             if (method.GetParameters().Length != 2 || method.GetParameters()[0].ParameterType != typeof(int))
                 throw new NotSupportedException("GPU collection adapters require an integer indexer.");

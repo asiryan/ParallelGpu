@@ -9,9 +9,9 @@ internal sealed class CollectionMethodTranslator(TypeBuilder helpers)
     private readonly Dictionary<MethodInfo, MethodInfo> accessors = new();
     private readonly AdapterMethodTranslator adapters = new(helpers);
 
-    internal bool TryEmit(ILGenerator il, MethodInfo method)
+    internal bool TryEmit(ILGenerator il, MethodInfo method, Type? receiverType = null)
     {
-        if (adapters.TryEmit(il, method))
+        if (adapters.TryEmit(il, method, receiverType))
             return true;
         var type = method.DeclaringType!;
         if (type.IsArray && CapturedCollection.ElementType(type) is not null)

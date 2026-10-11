@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace ParallelGpu;
@@ -33,7 +34,7 @@ public static class GpuCollectionAdapters
             (type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(List<>) ||
                 type.GetGenericTypeDefinition() == typeof(IList<>) || type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))))
             throw new InvalidOperationException($"Collection '{type}' already has a built-in GPU representation.");
-        if (!type.GetProperties().Any(property => property.PropertyType == typeof(T) &&
+        if (!Properties(type).Any(property => property.PropertyType == typeof(T) &&
             property.GetIndexParameters().Length == 1 && property.GetIndexParameters()[0].ParameterType == typeof(int) &&
             property.GetMethod is not null))
             throw new ArgumentException($"Collection '{type}' must expose a readable integer indexer of type '{typeof(T)}'.", nameof(capture));
@@ -60,6 +61,42 @@ public static class GpuCollectionAdapters
 
     internal static bool SupportsRuntime(Type type) => BuiltinElement(type) is not null ||
         adapters.Keys.Any(candidate => candidate.IsAssignableFrom(type));
+
+    /// <summary>Finds public properties, including properties inherited by interfaces.</summary>
+    private static IEnumerable<PropertyInfo> Properties(Type type) => type.IsInterface
+        ? type.GetInterfaces().Append(type).SelectMany(candidate => candidate.GetProperties())
+        : type.GetProperties();
+
+    /// <summary>Resolves registered indexer accessors by metadata rather than their generated names.</summary>
+    internal static string? AccessorOperation(Type type, MethodInfo method, Type element)
+    {
+        foreach (var property in Properties(type))
+        {
+            var indices = property.GetIndexParameters();
+            if (property.PropertyType == element && indices.Length == 1 && indices[0].ParameterType == typeof(int))
+            {
+                if (SameAccessor(property.GetMethod, method))
+                    return "get_Item";
+                if (SameAccessor(property.SetMethod, method))
+                    return "set_Item";
+            }
+            if (indices.Length == 0 && property.PropertyType == typeof(int) &&
+                property.Name is "Count" or "Length" && SameAccessor(property.GetMethod, method))
+                return "get_Count";
+        }
+        return null;
+    }
+
+    /// <summary>Matches inherited accessor metadata independently of its reflected receiver type.</summary>
+    private static bool SameAccessor(MethodInfo? candidate, MethodInfo method)
+    {
+        if (candidate is null)
+            return false;
+        candidate = candidate.GetBaseDefinition();
+        method = method.GetBaseDefinition();
+        return candidate.Module == method.Module && candidate.MetadataToken == method.MetadataToken &&
+            candidate.DeclaringType == method.DeclaringType;
+    }
 
     private static Type? BuiltinElement(Type type)
     {
@@ -122,7 +159,7 @@ public static class GpuCollectionAdapters
 
     private static Adapter? FindAdapter(Type runtime, Type element)
     {
-        if (adapters.TryGetValue(runtime, out var direct))
+        if (adapters.TryGetValue(runtime, out var direct) && direct.Element == element)
             return direct;
         var candidates = adapters.Where(pair => pair.Value.Element == element && pair.Key.IsAssignableFrom(runtime)).ToArray();
         var mostSpecific = candidates.Where(candidate => !candidates.Any(other =>

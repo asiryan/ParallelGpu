@@ -57,6 +57,9 @@ internal readonly struct DeviceExecutionContext
             case 10: throw new ArgumentException("Clamp minimum must not exceed maximum.");
             case 11: throw new DivideByZeroException("An integer GPU operation divided by zero.");
             case 12: throw new OverflowException("An integer GPU operation overflowed.");
+            case 13: throw new ArgumentException("Offset and count exceed the array length.");
+            case 14: throw new ArgumentOutOfRangeException("offset", "An ArraySegment offset must be nonnegative.");
+            case 15: throw new ArgumentOutOfRangeException("count", "An ArraySegment count must be nonnegative.");
             default: throw new InvalidOperationException("A GPU loop reported an invalid device operation.");
         }
     }

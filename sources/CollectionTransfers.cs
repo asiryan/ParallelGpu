@@ -11,10 +11,10 @@ namespace ParallelGpu;
 internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
 {
     /// <summary>Typed registration delegates shared across invocations to avoid repeated generic reflection.</summary>
-    private static readonly ConcurrentDictionary<Type, Func<CollectionTransfers, object, CapturedCollection>>
+    private static readonly ConcurrentDictionary<Type, Func<CollectionTransfers, object, Type, CapturedCollection>>
         factories = new();
     /// <summary>Host wrappers grouped by element type and reference identity so distinct typed adapters retain their storage.</summary>
-    private readonly Dictionary<Type, Dictionary<object, CapturedCollection>> collections = new();
+    private readonly Dictionary<(Type Element, Type? Declaration), Dictionary<object, CapturedCollection>> collections = new();
     /// <summary>Reference identities shared by all typed representations of the same host object.</summary>
     private readonly Dictionary<object, int> identities = new(ReferenceIdentityComparer.Instance);
     /// <summary>Shared staged snapshots keyed by their host storage identities.</summary>
@@ -53,43 +53,49 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <summary>Registers a host collection using the supplied element type.</summary>
     /// <param name="source">The host collection to register.</param>
     /// <param name="elementType">The supported element type.</param>
+    /// <param name="declaredType">The capture declaration selecting its native or adapted representation.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
-    internal CapturedCollection Add(object? source, Type elementType) =>
-        source is null ? new CapturedNullCollection(this) : factories.GetOrAdd(elementType, CreateFactory)(this, source);
+    internal CapturedCollection Add(object? source, Type elementType, Type declaredType) =>
+        source is null ? new CapturedNullCollection(this) : factories.GetOrAdd(elementType, CreateFactory)(this, source, declaredType);
 
     /// <summary>Builds a typed registration delegate without reflection on individual jagged rows.</summary>
     /// <param name="elementType">The supported element type to bind.</param>
     /// <returns>A registration delegate cached for that element type.</returns>
-    private static Func<CollectionTransfers, object, CapturedCollection> CreateFactory(Type elementType) =>
-        (Func<CollectionTransfers, object, CapturedCollection>)typeof(CollectionTransfers)
+    private static Func<CollectionTransfers, object, Type, CapturedCollection> CreateFactory(Type elementType) =>
+        (Func<CollectionTransfers, object, Type, CapturedCollection>)typeof(CollectionTransfers)
             .GetMethod(nameof(AddTyped), BindingFlags.NonPublic | BindingFlags.Static)!
             .MakeGenericMethod(elementType)
-            .CreateDelegate(typeof(Func<CollectionTransfers, object, CapturedCollection>));
+            .CreateDelegate(typeof(Func<CollectionTransfers, object, Type, CapturedCollection>));
 
     /// <summary>Adapts typed registration to the cached untyped factory signature.</summary>
     /// <typeparam name="T">The supported element type.</typeparam>
     /// <param name="transfers">The current invocation's registry.</param>
     /// <param name="source">The host collection to register.</param>
+    /// <param name="declaredType">The capture declaration selecting its representation.</param>
     /// <returns>The registered collection wrapper.</returns>
-    private static CapturedCollection AddTyped<T>(CollectionTransfers transfers, object source)
-        => transfers.Add<T>(source);
+    private static CapturedCollection AddTyped<T>(CollectionTransfers transfers, object source, Type declaredType)
+        => transfers.Add<T>(source, declaredType);
 
     /// <summary>Registers a typed host collection and reuses wrappers for existing aliases.</summary>
     /// <typeparam name="T">The supported element type.</typeparam>
     /// <param name="source">The host collection to register.</param>
+    /// <param name="declaredType">The optional declaration; internal backing registrations use native storage.</param>
     /// <returns>The shared wrapper for the source object's identity.</returns>
-    internal CapturedCollection Add<T>(object source)
+    internal CapturedCollection Add<T>(object source, Type? declaredType = null)
     {
-        if (!collections.TryGetValue(typeof(T), out var typedCollections))
+        bool native = (source is Array || source is List<T>) &&
+            (declaredType is null || CapturedCollection.IsNativeCollection(declaredType));
+        var key = (typeof(T), native ? null : declaredType ?? source.GetType());
+        if (!collections.TryGetValue(key, out var typedCollections))
         {
             typedCollections = new(ReferenceIdentityComparer.Instance);
-            collections.Add(typeof(T), typedCollections);
+            collections.Add(key, typedCollections);
         }
         // An object may expose several registered indexers with independent element types.
         if (typedCollections.TryGetValue(source, out var existing))
             return existing;
         CapturedCollection collection;
-        if (source is not Array && source is not List<T> &&
+        if (!native &&
             GpuCollectionAdapters.TryCapture<T>(source, adapterSnapshots, out var snapshot))
         {
             var backing = (CapturedCollection<T>)Add<T>(snapshot.Identity is Array || snapshot.Identity is List<T>

@@ -15,6 +15,8 @@ internal static class DeviceNumericMethods
           ((info.Name == nameof(Math.Clamp) && Matches(info, 3) && IsNumber(info.ReturnType)) ||
            (info.Name == nameof(Math.Abs) && Matches(info, 1) && IsSignedInteger(info.ReturnType)))) ||
          (IsMath(info) && info.Name is nameof(Math.Min) or nameof(Math.Max) && Matches(info, 2) &&
+          (info.ReturnType == typeof(float) || info.ReturnType == typeof(double))) ||
+         (IsMath(info) && info.Name == "CopySign" && Matches(info, 2) &&
           (info.ReturnType == typeof(float) || info.ReturnType == typeof(double))));
 
     internal static void Validate(MethodBase method)
@@ -41,7 +43,7 @@ internal static class DeviceNumericMethods
         return info.Name switch
         {
             nameof(Math.Abs) or nameof(Math.Ceiling) or nameof(Math.Floor) or nameof(Math.Sqrt) => Matches(info, 1),
-            "CopySign" or nameof(Math.Min) or nameof(Math.Max) => Matches(info, 2),
+            nameof(Math.Min) or nameof(Math.Max) => Matches(info, 2),
             _ => false,
         };
     }

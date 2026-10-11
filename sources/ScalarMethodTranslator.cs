@@ -47,9 +47,10 @@ internal sealed class ScalarMethodTranslator
         DeviceNativeTypes.IsSupported(type.IsByRef ? type.GetElementType()! : type) ||
         CapturedCollection.ElementType(type.IsByRef ? type.GetElementType()! : type) is not null;
 
-    internal void EmitCall(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext)
+    internal void EmitCall(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext,
+        Type? receiverType = null)
     {
-        if (collections.TryEmit(il, method))
+        if (collections.TryEmit(il, method, receiverType))
             return;
         if ((!method.IsStatic && !IsCompatible(method.DeclaringType!)) ||
             !IsCompatible(method.ReturnType) || method.GetParameters().Any(p => !IsCompatible(p.ParameterType)))
@@ -183,7 +184,11 @@ internal sealed class ScalarMethodTranslator
             if (instruction.Operand is MethodInfo called &&
                 (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt))
             {
-                EmitCall(il, called, emitContext);
+                int receiverOffset = called.GetParameters().Length + 1;
+                Type? receiverType = !called.IsStatic &&
+                    stackTypes.TryGetValue(instruction.Offset, out var receiverStack) &&
+                    receiverStack.Length >= receiverOffset ? receiverStack[^receiverOffset] : null;
+                EmitCall(il, called, emitContext, receiverType);
                 continue;
             }
             DeviceInstructionValidation.Validate(instruction);
@@ -267,7 +272,14 @@ internal sealed class ScalarMethodTranslator
             return false;
         int width = stack.Length < 2 ? -1 : DeviceArithmetic.IntegerWidth(stack[^2]);
         if (width == 0)
-            return false;
+        {
+            if (instruction.Code != OpCodes.Rem)
+                return false;
+            emitContext(il);
+            il.Emit(OpCodes.Call, typeof(DeviceArithmetic).GetMethod(stack[^2] == typeof(float)
+                ? nameof(DeviceArithmetic.RemainderSingle) : nameof(DeviceArithmetic.RemainderDouble))!);
+            return true;
+        }
         if (width < 0)
             throw new NotSupportedException("Cannot determine the integer width for checked device arithmetic.");
         bool unsigned = instruction.Code == OpCodes.Div_Un || instruction.Code == OpCodes.Rem_Un;
@@ -367,7 +379,7 @@ internal sealed class ScalarMethodTranslator
                 var stacks = LoopStackTypes.Analyze(method, instructions);
                 if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code) &&
                     stacks.TryGetValue(instruction.Offset, out var stack) && stack.Length >= 2 &&
-                    DeviceArithmetic.IntegerWidth(stack[^2]) != 0))
+                    (DeviceArithmetic.IntegerWidth(stack[^2]) != 0 || instruction.Code == OpCodes.Rem)))
                     return true;
             }
         }

@@ -15,6 +15,12 @@ internal abstract class CapturedCollection
     /// <returns>Whether the element has a supported device representation.</returns>
     internal static bool IsSupportedElementType(Type type) => DeviceValueType.IsSupported(type);
 
+    /// <summary>Distinguishes native array/list captures from explicitly adapted declarations.</summary>
+    internal static bool IsNativeCollection(Type type) => type.IsArray ||
+        type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(List<>) ||
+            type.GetGenericTypeDefinition() == typeof(IList<>) ||
+            type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>));
+
     /// <summary>Finds a supported collection's ultimate leaf element type.</summary>
     /// <param name="type">The declared collection type.</param>
     /// <returns>The leaf element type, or null for unsupported collections.</returns>

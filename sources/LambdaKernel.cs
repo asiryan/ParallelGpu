@@ -11,6 +11,8 @@ namespace ParallelGpu;
 /// rebuilt for every invocation.</remarks>
 internal sealed class LambdaKernel
 {
+    /// <summary>Bounds temporary safe-reference storage without restricting the total loop extent.</summary>
+    private const int MaximumScratchBytes = 16 * 1024 * 1024;
     /// <summary>Persistent translated bodies shared by executors; no closures or accelerator resources are retained.</summary>
     private static readonly ConcurrentDictionary<MethodInfo, Lazy<TranslatedBody>> translatedBodies = new();
     /// <summary>The generated entry point, state layout, and capture paths for one ordinary method.</summary>
@@ -86,10 +88,11 @@ internal sealed class LambdaKernel
         using var transfers = new CollectionTransfers(gpu);
         for (int i = 0; i < captures.Length; i++)
             if (captures[i].Element is Type element)
-                values[i] = transfers.Add(values[i]!, element);
+                values[i] = transfers.Add(values[i]!, element, captures[i].Path[^1].FieldType);
         // All supported primitive leaves require at most eight-byte alignment.
         int scratchStride = checked((scratchElementSize + 7) & ~7);
-        using var scratch = gpu.Allocate<byte>(checked(count * scratchStride));
+        int chunkLength = scratchStride == 0 ? count : Math.Min(count, Math.Max(1, MaximumScratchBytes / scratchStride));
+        using var scratch = gpu.Allocate<byte>(checked(chunkLength * scratchStride));
         var execution = new DeviceExecutionContext(errors.View, scratch.View, scratchStride);
         transfers.Context = execution;
         transfers.Upload();
@@ -104,9 +107,16 @@ internal sealed class LambdaKernel
                     _ => DeviceValueType.ToDevice(values[i], captures[i].Path[^1].FieldType)
                 });
 
-        launch(count, start, state);
-        gpu.Synchronize();
-        DeviceExecutionContext.ThrowIfFailed(errors.ToArray()[0]);
+        // Captures and device collections remain shared across launches. Copyback occurs only
+        // after every chunk succeeds, so a later failure cannot commit an earlier chunk's writes.
+        for (int completed = 0; completed < count;)
+        {
+            int currentCount = Math.Min(chunkLength, count - completed);
+            launch(currentCount, checked(start + completed), state);
+            gpu.Synchronize();
+            DeviceExecutionContext.ThrowIfFailed(errors.ToArray()[0]);
+            completed += currentCount;
+        }
         transfers.CopyBack();
     }
 
@@ -262,7 +272,12 @@ internal sealed class LambdaKernel
                 if (instruction.Operand is ConstructorInfo constructor)
                     scalarMethods.EmitConstructor(il, instruction.Code, constructor, emitContext);
                 else
-                    scalarMethods.EmitCall(il, (MethodInfo)instruction.Operand!, emitContext);
+                {
+                    var called = (MethodInfo)instruction.Operand!;
+                    Type? receiver = !called.IsStatic && stackTypes.TryGetValue(instruction.Offset, out var callStack)
+                        ? callStack[callStack.Length - called.GetParameters().Length - 1] : null;
+                    scalarMethods.EmitCall(il, called, emitContext, receiver);
+                }
                 continue;
             }
             if (instruction.Code == OpCodes.Newobj)
@@ -434,10 +449,11 @@ internal sealed class LambdaKernel
         foreach (var instruction in instructions)
         {
             Type? element = instruction.Code == OpCodes.Ldelema ? (Type)instruction.Operand! : null;
-            if (instruction.Operand is MethodInfo called)
+            if (instruction.Operand is MethodBase called)
             {
-                if (called.ReturnType.IsByRef && CapturedCollection.ElementType(called.DeclaringType!) is not null)
-                    element = called.ReturnType.GetElementType();
+                if (called is MethodInfo info && info.ReturnType.IsByRef &&
+                    CapturedCollection.ElementType(called.DeclaringType!) is not null)
+                    element = info.ReturnType.GetElementType();
                 else
                     size = Math.Max(size, ScratchElementSize(called, visited));
             }

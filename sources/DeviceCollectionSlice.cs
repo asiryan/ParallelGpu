@@ -39,7 +39,9 @@ internal static class DeviceCollectionSlice
             return new(default, 0, elementSize: collection.ElementSize, identity: -1,
                 context: collection.Context, readOnly: collection.IsReadOnly);
         }
-        return new(collection.Bytes.SubView((long)start * collection.ElementSize, (long)length * collection.ElementSize),
+        // ILGPU rejects an empty SubView starting at the end of its parent view.
+        // An empty descriptor never dereferences its byte storage.
+        return new(length == 0 ? default : collection.Bytes.SubView((long)start * collection.ElementSize, (long)length * collection.ElementSize),
             length, elementSize: collection.ElementSize, writes: collection.Writes, dirtyIndex: collection.DirtyIndex,
             identity: collection.Identity, context: collection.Context, readOnly: collection.IsReadOnly);
     }
@@ -67,6 +69,15 @@ internal static class DeviceCollectionSlice
         {
             collection.Context.Fail(7);
             return Segment(collection);
+        }
+        // The constructor distinguishes negative arguments from a range that exceeds the array.
+        // Subtracting the nonnegative offset avoids overflow for very large offset/count values.
+        int errorCode = start < 0 ? 14 : length < 0 ? 15 : collection.Length - start < length ? 13 : 0;
+        if (errorCode != 0)
+        {
+            collection.Context.Fail(errorCode);
+            return Indexed(new(default, 0, elementSize: collection.ElementSize, identity: -1,
+                context: collection.Context, readOnly: collection.IsReadOnly));
         }
         return Indexed(Slice(collection, start, length));
     }
