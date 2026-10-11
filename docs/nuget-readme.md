@@ -48,10 +48,11 @@ Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.
 
 - Automatic transfers for arrays of any rank, jagged arrays, fixed-size lists, and supported memory views, with shared storage preserved.
 - Automatic value mappings for numeric types, `bool`, `char`, enums, supported structures, and nullable values.
-- Device buffers via `Upload<T>` and `Allocate<T>` to retain data between kernels.
+- Device buffers via `Upload<T>` and `Allocate<T>` to retain data between kernels, with partial `CopyFrom`/`CopyTo` transfers using array offsets/counts or spans.
 - Explicit value kernels through `IGpuForKernel` and `IGpuForEachKernel<T>`.
 - Reductions, atomic operations, and bounded append buffers for variable output.
-- Host collection adapters and explicit object-graph adapters for custom data models.
+- Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. Explicit object-graph adapters support custom data models.
+- Floating-point `%` and supported `Math`/`MathF` operations, including `CopySign`, `Sin`, `Cos`, `Pow` and both `Log` overloads (natural logarithm or a specified base).
 
 ## Execution requirements and limitations
 
@@ -63,7 +64,9 @@ Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods,
 
 Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers and download results when needed. Transfers and kernel compilation can outweigh the benefit of GPU execution for small or inexpensive workloads.
 
-Calls on one `Gpu` instance are serialized. Avoid modifying transferred host collections concurrently, and dispose the executor and its buffers when finished. Floating-point reduction results may differ from sequential CPU results and between devices.
+Bounds, null access, read-only writes and guarded arithmetic errors become host exceptions before automatic collection copyback, including `ref` access in value constructors. `ArraySegment<T>` constructor validation follows CLR behavior. Large loops may use several launches with shared device storage; copyback requires every launch to succeed. Owned device buffers and callback side effects are not rolled back.
+
+Calls on one `Gpu` instance are serialized. Avoid modifying transferred host collections concurrently, and dispose the executor and its buffers when finished. Transcendental functions are approximate; compare with a numerical tolerance. Floating-point reduction results may differ from sequential CPU results and between devices.
 
 ## Documentation and examples
 

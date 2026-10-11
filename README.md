@@ -10,7 +10,7 @@ Build **ParallelGpu** from source or install the NuGet package in your project.
 |-------------|:-------------:|:-------------:|:--------------:|:--------------:|
 | [ParallelGpu](sources) | .NET Standard 2.1 | Cross-platform | [Release](https://github.com/asiryan/ParallelGpu/releases/) | [NuGet](https://www.nuget.org/packages/ParallelGpu/) | 
 
-The NuGet package contains the library.
+The NuGet package restores ILGPU and ILGPU.Algorithms dependencies automatically.
 
 # Quick start
 
@@ -109,6 +109,8 @@ public readonly struct ScaleKernel(float factor) : IGpuForEachKernel<float>
 
 `Allocate<T>(length)` creates zero-filled storage. Direct buffers and explicit value kernels require public unmanaged ILGPU-compatible types; they do not apply automatic mappings for private structures, `bool`, `char`, or nullable values.
 
+`CopyFrom(deviceOffset, source, sourceOffset, count)` and `CopyTo(deviceOffset, destination, destinationOffset, count)` transfer array ranges. Offset-only overloads copy an entire array or span (`ReadOnlySpan<T>` for upload, `Span<T>` for download). Copies are synchronous; empty ranges at the buffer end are valid. `CopyFrom(array)` and `CopyTo(array)` still require an exact buffer-length match.
+
 GPU execution can be slower for cheap operations when transfers dominate. Measure complete calls after warm-up, and compare equivalent algorithms in Release mode.
 
 ## Reductions and atomics
@@ -146,7 +148,7 @@ Capacity is fixed. `TryAdd(value, out index)` reports success and the reserved s
 
 ## Collection adapters and object graphs
 
-- **Custom indexed collections:** register `GpuCollectionAdapters.Register<TCollection,T>` before compilation and supply a `GpuCollectionSnapshot<T>`. A snapshot describes the full buffer, slice, read-only status, shared identity, and optional host commit. Shared identities preserve aliases and reuse one commit per invocation. See [adapter and memory-manager examples](tests/CollectionAdapterTests.cs).
+- **Custom indexed collections:** register `GpuCollectionAdapters.Register<TCollection,T>` before compilation and supply a `GpuCollectionSnapshot<T>`. Inherited indexers and `IndexerName` are supported. Snapshots control the slice, read-only status, shared storage identity, and optional host commit (once per identity per invocation). Registered custom declarations use adapters, including `List<T>` subclasses; `List<T>`, `IList<T>`, and `IReadOnlyList<T>` captures use native storage. See [adapter and memory-manager examples](tests/CollectionAdapterTests.cs).
 - **Classes, shared objects, and cycles:** use `UploadObjectGraph<TObject,TRecord>` with `IGpuObjectGraphAdapter<TObject,TRecord>`. The host class becomes a public unmanaged record plus explicit links. Reserve record/reference capacity for device-side creation. `Download()` returns records; `CopyToHost()` updates existing objects and reconstructs new ones. See [object-graph examples](tests/ObjectGraphTests.cs).
 
 Adapters run on the host; callback failures can leave partial host changes. Graph roots and links may change, but capacities and each record's reference count are fixed. Newly created records become readable by other iterations in a later kernel. Graph handles belong to their graph. Graph errors make downloads fail; dispose the failed graph and upload a new one. Download append/graph results explicitly to validate their error flags.
@@ -160,19 +162,20 @@ Only the following `Math`/`MathF` signatures are supported. Parameters and retur
 | `Math.Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` |
 | `Math.Min`, `Math.Max`, `Math.Clamp` | The ten numeric types in the values table |
 | `Math.Sqrt`, `Math.Floor`, `Math.Ceiling` | `double` |
-| `Math.CopySign` | `double` |
+| `Math.CopySign`, `Math.Sin`, `Math.Cos`, `Math.Pow`, `Math.Log` | `double` |
 | `MathF.Abs`, `MathF.Sqrt`, `MathF.Floor`, `MathF.Ceiling` | `float` |
-| `MathF.CopySign`, `MathF.Min`, `MathF.Max` | `float` |
+| `MathF.CopySign`, `MathF.Min`, `MathF.Max`, `MathF.Sin`, `MathF.Cos`, `MathF.Pow`, `MathF.Log` | `float` |
 
-Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. Other intrinsic rounding can differ from CPU execution. Unsupported calls, including `Sin`, `Cos`, `Pow`, `Log`, and `Round`, are rejected before device compilation, including calls through helpers.
+Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. The `float`/`double` remainder operator (`%`) supports subnormals, signed zero, NaN, and infinity. `Log` accepts one argument (natural logarithm) or two (explicit base). Transcendental results and intrinsic rounding can differ slightly from CLR execution. Supported math also works in helpers and value constructors; unsupported calls, such as `Round`, are rejected before compilation.
 
 ## Execution rules and limitations
 
 The automatic lambda API requires runtime code generation (`Reflection.Emit`) and access to method IL. It is not supported in [Native AOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) applications.
 
 - Loops cover `[fromInclusive, toExclusive)` with at most `Int32.MaxValue` iterations. Empty and reversed ranges execute no body. Iterations are unordered; independent writes, atomics, or reductions must prevent races.
+- Automatic loops using element references may run in chunks to bound temporary storage. Device collection storage stays shared; host copyback occurs only after every chunk succeeds.
 - Scalar captures are refreshed per call and are read-only in the body. Collection elements are writable; read-only views reject writes. Array/list topology cannot change during an automatic loop.
-- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, and inverted `Clamp` bounds become host exceptions before automatic collection copyback. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
+- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, inverted `Clamp` bounds, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
 - Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native append/graph payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
 - Unsupported operations include direct managed/reference-bearing values, boxing, reflection, managed allocation, throwing bodies/exception handlers, checked integer arithmetic/conversions, dynamic managed dispatch, delegates, native pointers, and `ref struct` storage. Helpers remain subject to ILGPU and backend restrictions.
 
