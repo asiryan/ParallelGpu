@@ -31,7 +31,9 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
         get
         {
             var view = backing.View;
-            return new(view.Bytes.SubView((long)snapshot.Offset * view.ElementSize, (long)snapshot.Count * view.ElementSize),
+            // ILGPU rejects SubView(end, 0); empty slices never dereference byte storage.
+            return new(snapshot.Count == 0 ? default :
+                view.Bytes.SubView((long)snapshot.Offset * view.ElementSize, (long)snapshot.Count * view.ElementSize),
                 snapshot.Count, elementSize: nullBackedSegment ? 0 : view.ElementSize, writes: view.Writes, dirtyIndex: view.DirtyIndex,
                 shapeMetadata: transfers.Shapes, shapeOffset: shapeOffset, rank: 1, identity: Identity,
                 context: view.Context, readOnly: snapshot.IsReadOnly ? 1 : 0,
