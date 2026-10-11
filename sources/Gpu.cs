@@ -41,6 +41,7 @@ public sealed partial class Gpu : IDisposable
 
         context = Context.Create(builder =>
         {
+            builder.EnableAlgorithms();
             builder.CPU();
             if (options.Backend is GpuBackend.Auto or GpuBackend.Cuda)
                 builder.Cuda();

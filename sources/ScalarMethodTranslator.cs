@@ -72,6 +72,15 @@ internal sealed class ScalarMethodTranslator
         if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
             return method;
         DeviceNumericMethods.Validate(method);
+        if (DeviceNumericMethods.IsExtendedMath(method))
+        {
+            var replacement = typeof(DeviceExtendedMath).GetMethod(method.Name +
+                (method.ReturnType == typeof(float) ? "Single" : "Double"),
+                method.GetParameters().Select(parameter => parameter.ParameterType)
+                    .Append(typeof(DeviceExecutionContext)).ToArray())!;
+            methods.Add(method, replacement);
+            return replacement;
+        }
         if (DeviceNumericMethods.IsLowered(method))
             return method.Name == nameof(Math.Clamp) ? TranslateClamp(method) : TranslateArithmeticMethod(method);
         DeviceInstructionValidation.ValidateCallGraph(method, validated);

@@ -427,26 +427,21 @@ public sealed class FinalArithmeticAuditTests(GpuFixture fixture)
 
     private static int CheckedIncrement(int value) => checked(value + 1);
     [Fact]
-    public void FrameworkPowerAndSineAreRejectedBeforeCompilationInDirectAndHelperCalls()
+    public void FrameworkPowerAndSineExecuteInDirectAndHelperCalls()
     {
-        double[] input = [2], output = [41];
-        var failure = Record.Exception(() => Gpu.For(0, 1, i => output[i] = Math.Pow(input[i], 2)));
-        Assert.Equal(41, output[0]);
+        double[] input = [2], power = [41], helperPower = [41], sine = [41], helperSine = [41];
+        Gpu.For(0, 1, i =>
+        {
+            power[i] = Math.Pow(input[i], 2);
+            helperPower[i] = PowerDouble(input[i]);
+            sine[i] = Math.Sin(input[i]);
+            helperSine[i] = SineDouble(input[i]);
+        });
+        Assert.Equal(4, power[0]);
+        Assert.Equal(4, helperPower[0]);
+        Assert.Equal(Math.Sin(input[0]), sine[0], 12);
+        Assert.Equal(Math.Sin(input[0]), helperSine[0], 12);
         Recover();
-        Assert.IsType<NotSupportedException>(failure);
-        Assert.Contains("Framework math method", failure!.Message, StringComparison.Ordinal);
-        var helperFailure = Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = PowerDouble(input[i])));
-        Assert.Equal(41, output[0]);
-        Recover();
-        Assert.Contains("Framework math method", helperFailure.Message, StringComparison.Ordinal);
-        var sineFailure = Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = Math.Sin(input[i])));
-        Assert.Equal(41, output[0]);
-        Recover();
-        Assert.Contains("Framework math method", sineFailure.Message, StringComparison.Ordinal);
-        var sineHelperFailure = Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = SineDouble(input[i])));
-        Assert.Equal(41, output[0]);
-        Recover();
-        Assert.Contains("Framework math method", sineHelperFailure.Message, StringComparison.Ordinal);
     }
 
     private static double PowerDouble(double value) => Math.Pow(value, 2);

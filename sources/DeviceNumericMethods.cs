@@ -10,7 +10,7 @@ internal static class DeviceNumericMethods
     internal static bool IsMath(MethodBase method) =>
         method.DeclaringType == typeof(Math) || method.DeclaringType == typeof(MathF);
 
-    internal static bool IsLowered(MethodBase method) => method is MethodInfo info &&
+    internal static bool IsLowered(MethodBase method) => IsExtendedMath(method) || method is MethodInfo info &&
         ((info.DeclaringType == typeof(Math) &&
           ((info.Name == nameof(Math.Clamp) && Matches(info, 3) && IsNumber(info.ReturnType)) ||
            (info.Name == nameof(Math.Abs) && Matches(info, 1) && IsSignedInteger(info.ReturnType)))) ||
@@ -18,6 +18,16 @@ internal static class DeviceNumericMethods
           (info.ReturnType == typeof(float) || info.ReturnType == typeof(double))) ||
          (IsMath(info) && info.Name == "CopySign" && Matches(info, 2) &&
           (info.ReturnType == typeof(float) || info.ReturnType == typeof(double))));
+
+    internal static bool IsExtendedMath(MethodBase method) => method is MethodInfo info && IsMath(info) &&
+        info.ReturnType == (info.DeclaringType == typeof(Math) ? typeof(double) : typeof(float)) &&
+        (info.Name switch
+        {
+            nameof(Math.Sin) or nameof(Math.Cos) => Matches(info, 1),
+            nameof(Math.Pow) => Matches(info, 2),
+            nameof(Math.Log) => Matches(info, 1) || Matches(info, 2),
+            _ => false,
+        });
 
     internal static void Validate(MethodBase method)
     {
