@@ -196,7 +196,7 @@ dotnet test tests/ParallelGpu.Tests.csproj -c Release
 $env:PARALLEL_GPU_TEST_BACKEND = 'Cuda'
 dotnet test tests/ParallelGpu.Tests.csproj -c Release
 dotnet run --project samples/FloatMatrixMultiplication -c Release
-dotnet run --project samples/ComplexVectorMultiplication -c Release
+dotnet run --project samples/FastFourierTransform -c Release
 dotnet run --project samples/PasswordHashSearch -c Release
 dotnet run --project samples/MonteCarloPi -c Release
 dotnet run --project samples/SemiPrimeFactorization -c Release
