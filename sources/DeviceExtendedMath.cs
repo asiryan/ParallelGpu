@@ -6,7 +6,7 @@ namespace ParallelGpu;
 /// <summary>Lowers supported framework math with double intermediates and explicit exceptional-value handling.</summary>
 /// <remarks>Results are approximate, not necessarily correctly rounded; Exp and Pow can differ at underflow and overflow
 /// boundaries. Floating-point evaluation also depends on ILGPU backend optimizations.</remarks>
-internal static class DeviceExtendedMath
+internal static partial class DeviceExtendedMath
 {
     private const double Ln2High = 0.69314718036912381649017333984375;
     private const double Ln2Low = 1.90821492927058770002e-10;

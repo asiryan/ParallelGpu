@@ -153,18 +153,24 @@ Adapters run on the host; callback failures can leave partial host changes. Grap
 
 ## Framework math
 
-Only the following `Math`/`MathF` signatures are supported. Parameters and return values use the stated type.
+`Math` and `MathF` support the .NET 8 numerical overloads using the ten numeric types in the values table. Floating functions use `double` for `Math` and `float` for `MathF`; `Math.Abs`, `Math.Min`, `Math.Max`, and `Math.Sign` also accept `float`.
 
 | Methods | Types |
 | --- | --- |
 | `Math.Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` |
 | `Math.Min`, `Math.Max`, `Math.Clamp` | The ten numeric types in the values table |
-| `Math.Sqrt`, `Math.Floor`, `Math.Ceiling` | `double` |
-| `Math.CopySign`, `Math.Sin`, `Math.Cos`, `Math.Pow`, `Math.Exp`, `Math.Log` | `double` |
-| `MathF.Abs`, `MathF.Sqrt`, `MathF.Floor`, `MathF.Ceiling` | `float` |
-| `MathF.CopySign`, `MathF.Min`, `MathF.Max`, `MathF.Sin`, `MathF.Cos`, `MathF.Pow`, `MathF.Exp`, `MathF.Log` | `float` |
+| `MathF.Abs`, `MathF.Min`, `MathF.Max` | `float` |
+| `Sqrt`, `Cbrt`, `Pow`, `Exp`, `Log`, `Log2`, `Log10` | `float`, `double` |
+| `Sin`, `Cos`, `SinCos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2` | `float`, `double` |
+| `Sinh`, `Cosh`, `Tanh`, `Asinh`, `Acosh`, `Atanh` | `float`, `double` |
+| `Floor`, `Ceiling`, `Truncate`, `Round` (all four overloads) | `float`, `double` |
+| `CopySign`, `IEEERemainder`, `FusedMultiplyAdd`, `MinMagnitude`, `MaxMagnitude` | `float`, `double` |
+| `BitIncrement`, `BitDecrement`, `ScaleB`, `ILogB`, `ReciprocalEstimate`, `ReciprocalSqrtEstimate` | `float`, `double` |
+| `Sign` | `sbyte`, `short`, `int`, `long`, `float`, `double`; returns `int` |
+| `Math.BigMul` | `int` inputs and `long` result; `long`/`ulong` inputs with high result and `out` low bits |
+| `Math.DivRem` | Eight integer types with tuple results; `int`/`long` also support `out` remainder |
 
-Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. The `float`/`double` remainder operator (`%`) supports subnormals, signed zero, NaN, and infinity. `Log` accepts one argument (natural logarithm) or two (explicit base). Transcendental results and intrinsic rounding can differ slightly from CLR execution. Supported math also works in helpers and value constructors; unsupported calls, such as `Round`, are rejected before compilation.
+Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. Both `%` and `IEEERemainder` handle exceptional values and subnormals, with their distinct quotient rules. `Log` accepts one argument (natural logarithm) or two (explicit base). `Round` supports all five `MidpointRounding` modes, validates digits (0–15 for `double`, 0–6 for `float`), and preserves signed zero. `SinCos` and the two-argument `DivRem` return ordinary tuples. `FusedMultiplyAdd` uses portable software arithmetic to round only once across backends; it can cost more than native arithmetic. Transcendental results and reciprocal estimates may differ slightly from CLR execution. Supported math also works in helpers and value constructors. Overloads using `decimal`, `nint`, or `nuint` remain unsupported.
 
 ## Execution rules and limitations
 
@@ -173,7 +179,7 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 - Loops cover `[fromInclusive, toExclusive)` with at most `Int32.MaxValue` iterations. Empty and reversed ranges execute no body. Iterations are unordered; independent writes, atomics, or reductions must prevent races.
 - Automatic loops using element references may run in chunks to bound temporary storage. Device collection storage stays shared; host copyback occurs only after every chunk succeeds.
 - Scalar captures are refreshed per call and are read-only in the body. Collection elements are writable; read-only views reject writes. Array/list topology cannot change during an automatic loop.
-- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, inverted `Clamp` bounds, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
+- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, invalid `Clamp`/`Round` arguments, `Sign(NaN)`, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
 - Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native buffer/append/graph view payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
 - Unsupported operations include direct managed/reference-bearing values, boxing, reflection, managed allocation, throwing bodies/exception handlers, checked integer arithmetic/conversions, dynamic managed dispatch, delegates, native pointers, and `ref struct` storage. Helpers remain subject to ILGPU and backend restrictions.
 

@@ -85,12 +85,10 @@ internal sealed class ScalarMethodTranslator
         if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
             return method;
         DeviceNumericMethods.Validate(method);
-        if (DeviceNumericMethods.IsExtendedMath(method))
+        if (DeviceNumericMethods.ExtendedMathReplacement(method) is { } implementation)
         {
-            var replacement = typeof(DeviceExtendedMath).GetMethod(method.Name +
-                (method.ReturnType == typeof(float) ? "Single" : "Double"),
-                method.GetParameters().Select(parameter => parameter.ParameterType)
-                    .Append(typeof(DeviceExecutionContext)).ToArray())!;
+            var replacement = MapType(method.ReturnType) == method.ReturnType
+                ? implementation : TranslateMathResult(method, implementation);
             methods.Add(method, replacement);
             return replacement;
         }
@@ -101,6 +99,39 @@ internal sealed class ScalarMethodTranslator
             return TranslateCore(method);
         methods.Add(method, method);
         return method;
+    }
+
+    /// <summary>Copies a native math tuple result into the caller's automatically mapped value layout.</summary>
+    /// <remarks>SinCos and DivRem return framework tuples whose auto layout is replaced inside lambdas.
+    /// The arithmetic implementation retains its native signature; this bridge preserves both result fields.</remarks>
+    private MethodInfo TranslateMathResult(MethodInfo method, MethodInfo implementation)
+    {
+        AllowAccess(implementation.Module.Assembly);
+        Type resultType = method.ReturnType;
+        Type mappedResult = MapType(resultType);
+        var parameters = method.GetParameters().Select(parameter => MapType(parameter.ParameterType))
+            .Append(typeof(DeviceExecutionContext)).ToArray();
+        var bridge = helpers.DefineMethod("MathResult" + methods.Count,
+            MethodAttributes.Public | MethodAttributes.Static, mappedResult, parameters);
+        var il = bridge.GetILGenerator();
+        for (int i = 0; i < parameters.Length; i++)
+            il.Emit(OpCodes.Ldarg, (short)i);
+        il.Emit(OpCodes.Call, implementation);
+        var native = il.DeclareLocal(resultType);
+        var mapped = il.DeclareLocal(mappedResult);
+        il.Emit(OpCodes.Stloc, native);
+        il.Emit(OpCodes.Ldloca, mapped);
+        il.Emit(OpCodes.Initobj, mappedResult);
+        foreach (var field in resultType.GetFields(BindingFlags.Instance | BindingFlags.Public))
+        {
+            il.Emit(OpCodes.Ldloca, mapped);
+            il.Emit(OpCodes.Ldloca, native);
+            il.Emit(OpCodes.Ldfld, field);
+            il.Emit(OpCodes.Stfld, DeviceValueType.MapField(field));
+        }
+        il.Emit(OpCodes.Ldloc, mapped);
+        il.Emit(OpCodes.Ret);
+        return bridge;
     }
 
     /// <summary>Emits a compatible value constructor, translating values and numeric operations when required.</summary>

@@ -73,6 +73,9 @@ internal readonly struct DeviceExecutionContext
             case 13: throw new ArgumentException("Offset and count exceed the array length.");
             case 14: throw new ArgumentOutOfRangeException("offset", "An ArraySegment offset must be nonnegative.");
             case 15: throw new ArgumentOutOfRangeException("count", "An ArraySegment count must be nonnegative.");
+            case 16: throw new ArgumentOutOfRangeException("digits", "The number of rounding digits is outside the supported range.");
+            case 17: throw new ArgumentException("The rounding mode is invalid.", "mode");
+            case 18: throw new ArithmeticException("A NaN value has no sign.");
             default: throw new InvalidOperationException("A GPU loop reported an invalid device operation.");
         }
     }

@@ -53,7 +53,7 @@ Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.
 - Explicit value kernels through `IGpuForKernel` and `IGpuForEachKernel<T>`.
 - Reductions, atomic operations, and bounded append buffers for variable output.
 - Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. Explicit object-graph adapters support custom data models.
-- Floating-point `%` and supported `Math`/`MathF` operations, including `CopySign`, `Sin`, `Cos`, `Pow`, `Exp` and both `Log` overloads (natural logarithm or a specified base).
+- Floating-point `%` and .NET 8 `Math`/`MathF` overloads for the supported numeric types, including trigonometry, hyperbolic functions, logarithms, rounding modes, fused multiply-add, IEEE helpers, `BigMul`, and both `DivRem` forms. Overloads using `decimal`, `nint`, or `nuint` are excluded.
 
 ## Execution requirements and limitations
 
