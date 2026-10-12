@@ -30,8 +30,8 @@ public static class FourierTransform
 
         using var buffer = gpu.Upload(hostValues);
         var values = buffer.DeviceView;
-        TransformAxis(gpu, values, columns, rows, elementStride: 1, batchStride: columns);
-        TransformAxis(gpu, values, rows, columns, elementStride: columns, batchStride: 1);
+        Transform(gpu, values, columns, rows, elementStride: 1, batchStride: columns);
+        Transform(gpu, values, rows, columns, elementStride: columns, batchStride: 1);
 
         if (normalized)
         {
@@ -54,7 +54,7 @@ public static class FourierTransform
     /// <param name="batchCount">The number of independent transforms.</param>
     /// <param name="elementStride">The distance between values in one transform.</param>
     /// <param name="batchStride">The distance between the starts of adjacent transforms.</param>
-    private static void TransformAxis(Gpu gpu, GpuView<Complex> values, int length, int batchCount,
+    private static void Transform(Gpu gpu, GpuView<Complex> values, int length, int batchCount,
         int elementStride, int batchStride)
     {
         if (length == 1)
