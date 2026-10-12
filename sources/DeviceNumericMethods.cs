@@ -19,15 +19,35 @@ internal static class DeviceNumericMethods
          (IsMath(info) && info.Name == "CopySign" && Matches(info, 2) &&
           (info.ReturnType == typeof(float) || info.ReturnType == typeof(double))));
 
-    internal static bool IsExtendedMath(MethodBase method) => method is MethodInfo info && IsMath(info) &&
-        info.ReturnType == (info.DeclaringType == typeof(Math) ? typeof(double) : typeof(float)) &&
-        (info.Name switch
-        {
-            nameof(Math.Sin) or nameof(Math.Cos) => Matches(info, 1),
-            nameof(Math.Pow) => Matches(info, 2),
-            nameof(Math.Log) => Matches(info, 1) || Matches(info, 2),
-            _ => false,
-        });
+    internal static bool IsExtendedMath(MethodBase method) =>
+        method is MethodInfo info && ExtendedMathReplacement(info) is not null;
+
+    /// <summary>Resolves an exact framework signature to its internal device implementation.</summary>
+    /// <remarks>Matching the complete parameter and return types keeps overloads for unsupported
+    /// numeric representations outside the device contract. The context is supplied by the caller.</remarks>
+    internal static MethodInfo? ExtendedMathReplacement(MethodInfo method)
+    {
+        if (!IsMath(method) || !method.IsStatic || method.IsGenericMethod)
+            return null;
+        var parameters = method.GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        if (parameters.Length == 0)
+            return null;
+        string? suffix = TypeSuffix(parameters[0]);
+        if (suffix is null)
+            return null;
+        var replacement = typeof(DeviceExtendedMath).GetMethod(method.Name + suffix,
+            BindingFlags.Public | BindingFlags.Static, null,
+            parameters.Append(typeof(DeviceExecutionContext)).ToArray(), null);
+        return replacement?.ReturnType == method.ReturnType ? replacement : null;
+    }
+
+    /// <summary>Names the primitive device representation used in internal numeric helpers.</summary>
+    private static string? TypeSuffix(Type type) => type == typeof(float) ? "Single" :
+        type == typeof(double) ? "Double" : type == typeof(sbyte) ? "Int8" :
+        type == typeof(byte) ? "UInt8" : type == typeof(short) ? "Int16" :
+        type == typeof(ushort) ? "UInt16" : type == typeof(int) ? "Int32" :
+        type == typeof(uint) ? "UInt32" : type == typeof(long) ? "Int64" :
+        type == typeof(ulong) ? "UInt64" : null;
 
     internal static void Validate(MethodBase method)
     {

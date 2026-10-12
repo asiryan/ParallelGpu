@@ -92,22 +92,20 @@ gpu.For(0, slice.Length, i =>
 
 ## Keep data on the device
 
-Automatic loops transfer captured collections on each call. Slices transfer their full backing owner to preserve aliases. For repeated work, upload once, run several kernels, and download once:
+Automatic loops transfer captured collections on each call. Slices transfer their full backing owner to preserve aliases. For repeated work, upload once, use the same lambda API with a device view, and download once:
 
 ```csharp
 using var buffer = gpu.Upload(new float[] { 1, 2, 3 });
-gpu.ForEach(buffer, new ScaleKernel(2));
-gpu.ForEach(buffer, new ScaleKernel(3));
+var values = buffer.DeviceView;
+gpu.For(0, values.Length, i => values[i] *= 2);
+gpu.For(0, values.Length, i => values[i] *= 3);
 float[] scaled = buffer.ToArray();
 // scaled: 6, 12, 18
-
-public readonly struct ScaleKernel(float factor) : IGpuForEachKernel<float>
-{
-    public void Execute(int index, ref float value) => value *= factor;
-}
 ```
 
 `Allocate<T>(length)` creates zero-filled storage. Direct buffers and explicit value kernels require public unmanaged ILGPU-compatible types; they do not apply automatic mappings for private structures, `bool`, `char`, or nullable values.
+
+`buffer.DeviceView` returns a borrowed `GpuView<T>` with `Length` and a ref indexer for loop bodies and explicit kernels. Lambda captures validate its owner and lifetime before execution. Indices must be in range in both modes; device buffer writes are not rolled back on failure. Device views require only `using ParallelGpu`; `buffer.View` remains available for existing backend interoperability.
 
 `CopyFrom(deviceOffset, source, sourceOffset, count)` and `CopyTo(deviceOffset, destination, destinationOffset, count)` transfer array ranges. Offset-only overloads copy an entire array or span (`ReadOnlySpan<T>` for upload, `Span<T>` for download). Copies are synchronous; empty ranges at the buffer end are valid. `CopyFrom(array)` and `CopyTo(array)` still require an exact buffer-length match.
 
@@ -155,18 +153,27 @@ Adapters run on the host; callback failures can leave partial host changes. Grap
 
 ## Framework math
 
-Only the following `Math`/`MathF` signatures are supported. Parameters and return values use the stated type.
+`Math` and `MathF` support the .NET 8 numerical overloads below. Each column lists argument/result types; arrows mark differing results. `Round` also accepts `int` digits and/or a `MidpointRounding` mode (all four overloads).
 
-| Methods | Types |
-| --- | --- |
-| `Math.Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` |
-| `Math.Min`, `Math.Max`, `Math.Clamp` | The ten numeric types in the values table |
-| `Math.Sqrt`, `Math.Floor`, `Math.Ceiling` | `double` |
-| `Math.CopySign`, `Math.Sin`, `Math.Cos`, `Math.Pow`, `Math.Log` | `double` |
-| `MathF.Abs`, `MathF.Sqrt`, `MathF.Floor`, `MathF.Ceiling` | `float` |
-| `MathF.CopySign`, `MathF.Min`, `MathF.Max`, `MathF.Sin`, `MathF.Cos`, `MathF.Pow`, `MathF.Log` | `float` |
+| Methods | `Math` | `MathF` |
+| --- | --- | --- |
+| `Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` | `float` |
+| `Min`, `Max` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` | `float` |
+| `Clamp` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` | *not supported* |
+| `Sqrt`, `Cbrt`, `Pow`, `Exp`, `Log`, `Log2`, `Log10` | `double` | `float` |
+| `Sin`, `Cos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2` | `double` | `float` |
+| `Sinh`, `Cosh`, `Tanh`, `Asinh`, `Acosh`, `Atanh` | `double` | `float` |
+| `Floor`, `Ceiling`, `Truncate`, `Round` | `double` | `float` |
+| `CopySign`, `IEEERemainder`, `FusedMultiplyAdd`, `MinMagnitude`, `MaxMagnitude` | `double` | `float` |
+| `BitIncrement`, `BitDecrement`, `ReciprocalEstimate`, `ReciprocalSqrtEstimate` | `double` | `float` |
+| `SinCos` | `double` → `(double Sin, double Cos)` | `float` → `(float Sin, float Cos)` |
+| `ScaleB` | `(double value, int exponent)` → `double` | `(float value, int exponent)` → `float` |
+| `ILogB` | `double` → `int` | `float` → `int` |
+| `Sign` | `sbyte`, `short`, `int`, `long`, `float`, `double` → `int` | `float` → `int` |
+| `BigMul` | `(int, int)` → `long`; `(long, long, out long low)` → `long` high; `(ulong, ulong, out ulong low)` → `ulong` high | *not supported* |
+| `DivRem` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong` → matching `(Quotient, Remainder)` tuple; `int`/`long` also support `out` remainder | *not supported* |
 
-Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. The `float`/`double` remainder operator (`%`) supports subnormals, signed zero, NaN, and infinity. `Log` accepts one argument (natural logarithm) or two (explicit base). Transcendental results and intrinsic rounding can differ slightly from CLR execution. Supported math also works in helpers and value constructors; unsupported calls, such as `Round`, are rejected before compilation.
+Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. Both `%` and `IEEERemainder` handle exceptional values and subnormals, with their distinct quotient rules. `Log` accepts one argument (natural logarithm) or two (explicit base). `Round` supports all five `MidpointRounding` modes, validates digits (0-15 for `double`, 0-6 for `float`), and preserves signed zero. `SinCos` and the two-argument `DivRem` return ordinary tuples. `FusedMultiplyAdd` uses portable software arithmetic to round only once across backends; it can cost more than native arithmetic. Transcendental results and reciprocal estimates may differ slightly from CLR execution. Supported math also works in helpers and value constructors. Overloads using `decimal`, `nint`, or `nuint` remain unsupported.
 
 ## Execution rules and limitations
 
@@ -175,8 +182,8 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 - Loops cover `[fromInclusive, toExclusive)` with at most `Int32.MaxValue` iterations. Empty and reversed ranges execute no body. Iterations are unordered; independent writes, atomics, or reductions must prevent races.
 - Automatic loops using element references may run in chunks to bound temporary storage. Device collection storage stays shared; host copyback occurs only after every chunk succeeds.
 - Scalar captures are refreshed per call and are read-only in the body. Collection elements are writable; read-only views reject writes. Array/list topology cannot change during an automatic loop.
-- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, inverted `Clamp` bounds, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
-- Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native append/graph payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
+- Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, invalid `Clamp`/`Round` arguments, `Sign(NaN)`, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
+- Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native buffer/append/graph view payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
 - Unsupported operations include direct managed/reference-bearing values, boxing, reflection, managed allocation, throwing bodies/exception handlers, checked integer arithmetic/conversions, dynamic managed dispatch, delegates, native pointers, and `ref struct` storage. Helpers remain subject to ILGPU and backend restrictions.
 
 # Build and test

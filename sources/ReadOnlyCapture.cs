@@ -55,7 +55,8 @@ internal static class ReadOnlyCapture
                 {
                     if (called is not MethodInfo method ||
                         !(collection && IsCollectionMember(method)) &&
-                        (method.ReturnType.IsByRef || !IsReadOnly(method, new HashSet<MethodInfo>())))
+                        ((method.ReturnType.IsByRef && !DeviceNativeTypes.IsElementReference(method)) ||
+                            !IsReadOnly(method, new HashSet<MethodInfo>())))
                         throw Unsupported();
                 }
                 if (code == OpCodes.Newobj || called is MethodInfo info && info.ReturnType != typeof(void))
@@ -239,7 +240,8 @@ internal static class ReadOnlyCapture
                         return false; // Receiver addresses cannot escape through helper parameters.
                 if (code != OpCodes.Newobj && !called.IsStatic && Take())
                 {
-                    if (called is not MethodInfo instance || instance.ReturnType.IsByRef ||
+                    if (called is not MethodInfo instance ||
+                        instance.ReturnType.IsByRef && !DeviceNativeTypes.IsElementReference(instance) ||
                         !IsReadOnly(instance, new HashSet<MethodInfo>(visited)))
                         return false;
                 }

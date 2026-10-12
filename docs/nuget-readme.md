@@ -49,10 +49,11 @@ Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.
 - Automatic transfers for arrays of any rank, jagged arrays, fixed-size lists, and supported memory views, with shared storage preserved.
 - Automatic value mappings for numeric types, `bool`, `char`, enums, supported structures, and nullable values.
 - Device buffers via `Upload<T>` and `Allocate<T>` to retain data between kernels, with partial `CopyFrom`/`CopyTo` transfers using array offsets/counts or spans.
+- Backend-independent `GpuView<T>` from `buffer.DeviceView` to use the same lambda API with data retained on the device.
 - Explicit value kernels through `IGpuForKernel` and `IGpuForEachKernel<T>`.
 - Reductions, atomic operations, and bounded append buffers for variable output.
 - Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. Explicit object-graph adapters support custom data models.
-- Floating-point `%` and supported `Math`/`MathF` operations, including `CopySign`, `Sin`, `Cos`, `Pow` and both `Log` overloads (natural logarithm or a specified base).
+- Floating-point `%` and .NET 8 `Math`/`MathF` overloads for the supported numeric types, including trigonometry, hyperbolic functions, logarithms, rounding modes, fused multiply-add, IEEE helpers, `BigMul`, and both `DivRem` forms. Overloads using `decimal`, `nint`, or `nuint` are excluded.
 
 ## Execution requirements and limitations
 
@@ -63,6 +64,8 @@ Loop iterations are unordered. Use independent writes, atomics, or reductions to
 Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Automatic structure mappings cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. Direct device buffers and explicit value kernels require public unmanaged ILGPU-compatible types.
 
 Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers and download results when needed. Transfers and kernel compilation can outweigh the benefit of GPU execution for small or inexpensive workloads.
+
+`GpuView<T>` borrows device memory. Lambda captures validate its owner and lifetime before execution; indices must be in range in both lambdas and explicit kernels. Device buffer writes are not rolled back on later errors.
 
 Bounds, null access, read-only writes and guarded arithmetic errors become host exceptions before automatic collection copyback, including `ref` access in value constructors. `ArraySegment<T>` constructor validation follows CLR behavior. Large loops may use several launches with shared device storage; copyback requires every launch to succeed. Owned device buffers and callback side effects are not rolled back.
 

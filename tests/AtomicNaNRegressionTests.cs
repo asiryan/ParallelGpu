@@ -25,6 +25,37 @@ public sealed class AtomicNaNRegressionTests(GpuFixture fixture)
     }
 
     [Fact]
+    public void FloatingCompareExchangeMatchesNaNPayloadAndSignedZeroBits()
+    {
+        float nan32 = BitConverter.Int32BitsToSingle(0x7fc12345);
+        double nan64 = BitConverter.Int64BitsToDouble(0x7ff8123456789abc);
+        float otherNan32 = BitConverter.Int32BitsToSingle(0x7fc12346);
+        double otherNan64 = BitConverter.Int64BitsToDouble(0x7ff8123456789abd);
+        float[] targets32 = [nan32, nan32, 0.0f, -0.0f, 0.0f, -0.0f];
+        double[] targets64 = [nan64, nan64, 0.0, -0.0, 0.0, -0.0];
+        float[] comparands32 = [nan32, otherNan32, -0.0f, 0.0f, 0.0f, -0.0f];
+        double[] comparands64 = [nan64, otherNan64, -0.0, 0.0, 0.0, -0.0];
+        float[] expectedPrevious32 = targets32.ToArray();
+        double[] expectedPrevious64 = targets64.ToArray();
+        float[] previous32 = new float[targets32.Length];
+        double[] previous64 = new double[targets64.Length];
+        fixture.Gpu.For(0, targets32.Length, i =>
+        {
+            previous32[i] = GpuAtomic.CompareExchange(ref targets32[i], 7f, comparands32[i]);
+            previous64[i] = GpuAtomic.CompareExchange(ref targets64[i], 7d, comparands64[i]);
+        });
+        for (int i = 0; i < targets32.Length; i++)
+        {
+            Assert.Equal(BitConverter.SingleToInt32Bits(expectedPrevious32[i]), BitConverter.SingleToInt32Bits(previous32[i]));
+            Assert.Equal(BitConverter.DoubleToInt64Bits(expectedPrevious64[i]), BitConverter.DoubleToInt64Bits(previous64[i]));
+            Assert.Equal(BitConverter.SingleToInt32Bits(i is 0 or 4 or 5 ? 7f : expectedPrevious32[i]),
+                BitConverter.SingleToInt32Bits(targets32[i]));
+            Assert.Equal(BitConverter.DoubleToInt64Bits(i is 0 or 4 or 5 ? 7d : expectedPrevious64[i]),
+                BitConverter.DoubleToInt64Bits(targets64[i]));
+        }
+    }
+
+    [Fact]
     public void FloatingAddsCompleteWhenNaNIsAlreadyPresentOrProducedByAnotherIteration()
     {
         float[] nan32 = [float.NaN], becomesNaN32 = [float.PositiveInfinity];

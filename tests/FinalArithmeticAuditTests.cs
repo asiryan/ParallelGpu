@@ -236,13 +236,13 @@ public sealed class FinalArithmeticAuditTests(GpuFixture fixture)
     }
 
     [Fact]
-    public void UnsupportedFrameworkRoundingIsRejectedBeforeCompilationInDirectAndHelperCalls()
+    public void UnsupportedDecimalRoundingIsRejectedBeforeCompilationInDirectAndHelperCalls()
     {
-        double[] input = [2.5], output = [41];
+        decimal[] input = [2.5m], output = [41m];
         Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = Math.Round(input[i])));
         Assert.Equal(41, output[0]);
         Recover();
-        Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = RoundDouble(input[i])));
+        Assert.Throws<NotSupportedException>(() => Gpu.For(0, 1, i => output[i] = RoundDecimal(input[i])));
         Assert.Equal(41, output[0]);
         Recover();
     }
@@ -472,7 +472,7 @@ public sealed class FinalArithmeticAuditTests(GpuFixture fixture)
     private static int DivideAndRemainder(int left, int right) => left / right + left % right;
     private static int ClampInteger(int value, int minimum, int maximum) => Math.Clamp(value, minimum, maximum);
     private static double ClampDouble(double value, double minimum, double maximum) => Math.Clamp(value, minimum, maximum);
-    private static double RoundDouble(double value) => Math.Round(value);
+    private static decimal RoundDecimal(decimal value) => Math.Round(value);
 
     private void Recover()
     {

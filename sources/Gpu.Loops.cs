@@ -20,13 +20,13 @@ public sealed partial class Gpu
     /// <para>Captures are refreshed on every call. Deferred loop errors are checked before automatic host
     /// copyback and adapter commits. Empty and reversed ranges skip compilation and execution.</para>
     /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
-    /// Captured append and graph views must be live and owned by this executor. Their result APIs check their
-    /// own deferred errors, and their device writes are not rolled back on a loop failure.</para>
+    /// Captured buffer, append, and graph views must be live and owned by this executor. Their device writes
+    /// are not rolled back on a loop failure; append and graph result APIs check their own deferred errors.</para>
     /// <para>Requires runtime code generation and method IL; Native AOT is unsupported.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">An intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, or an ArraySegment constructor range exceeds its array.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
+    /// <exception cref="ArgumentException">An intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, a rounding mode is invalid, or an ArraySegment constructor range exceeds its array.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used invalid rounding digits, an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
     /// <exception cref="NotSupportedException">The body uses unsupported operations, including checked integer arithmetic or conversions, or a captured collection is unsupported.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
@@ -34,6 +34,7 @@ public sealed partial class Gpu
     /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
     /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
     /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
+    /// <exception cref="ArithmeticException">Math.Sign or MathF.Sign received NaN.</exception>
     public void For(int fromInclusive, int toExclusive, Action<int> body) =>
         ForBody(fromInclusive, toExclusive, body, null);
 
@@ -46,8 +47,8 @@ public sealed partial class Gpu
     /// Compilation and transfers are automatic, and results are available on return.
     /// The element type is validated even for empty and reversed ranges; other execution rules match the non-generic overload.</remarks>
     /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">A captured collection has a different element type, an intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, or an ArraySegment constructor range exceeds its array.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
+    /// <exception cref="ArgumentException">A captured collection has a different element type, an intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, a rounding mode is invalid, or an ArraySegment constructor range exceeds its array.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used invalid rounding digits, an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
     /// <exception cref="NotSupportedException">The element type, body, or captured collection is unsupported, including checked integer arithmetic or conversions.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
@@ -55,6 +56,7 @@ public sealed partial class Gpu
     /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
     /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
     /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
+    /// <exception cref="ArithmeticException">Math.Sign or MathF.Sign received NaN.</exception>
     public void For<T>(int fromInclusive, int toExclusive, Action<int> body)
     {
         LambdaKernel.ValidateElementType(typeof(T));
