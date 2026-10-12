@@ -1,4 +1,3 @@
-using ILGPU;
 using ParallelGpu;
 
 namespace DigitRecognizer;
@@ -188,8 +187,8 @@ public sealed class GpuNeuralNetwork : IDisposable
         for (int offset = 0; offset < sampleIndices.Length;)
         {
             int count = Math.Min(BatchSize, sampleIndices.Length - offset);
-            Forward(trainingPixels.View, trainingLabels.View, order.View, offset, count,
-                metrics.View, offset, batchPredictions.View, 0);
+            Forward(trainingPixels.DeviceView, trainingLabels.DeviceView, order.DeviceView, offset, count,
+                metrics.DeviceView, offset, batchPredictions.DeviceView, 0);
             offset += count;
         }
         NetworkMetric total = gpu.Reduce(metrics, new NetworkMetricSum());
@@ -208,7 +207,7 @@ public sealed class GpuNeuralNetwork : IDisposable
     public int[] PredictTrainingRows(int[] sampleIndices)
     {
         PrepareOrder(sampleIndices);
-        return PredictViews(trainingPixels.View, trainingLabels.View, order.View, sampleIndices.Length);
+        return PredictViews(trainingPixels.DeviceView, trainingLabels.DeviceView, order.DeviceView, sampleIndices.Length);
     }
 
     /// <summary>Uploads another dataset and predicts all of its images without training.</summary>
@@ -224,7 +223,7 @@ public sealed class GpuNeuralNetwork : IDisposable
         // Prediction does not use labels, even if the caller supplied a labeled dataset.
         using var labels = gpu.Allocate<int>(0);
         using var indices = gpu.Upload(Enumerable.Range(0, data.Count).ToArray());
-        return PredictViews(pixels.View, labels.View, indices.View, data.Count);
+        return PredictViews(pixels.DeviceView, labels.DeviceView, indices.DeviceView, data.Count);
     }
 
     /// <summary>Saves the trained layer dimensions, weights, and biases as a binary model.</summary>
@@ -255,14 +254,14 @@ public sealed class GpuNeuralNetwork : IDisposable
     /// <param name="indices">The selected image indices in prediction order.</param>
     /// <param name="count">The positive number of selected images.</param>
     /// <returns>One predicted digit for each selected image, preserving the supplied order.</returns>
-    private int[] PredictViews(ArrayView<float> pixels, ArrayView<int> labels, ArrayView<int> indices, int count)
+    private int[] PredictViews(GpuView<float> pixels, GpuView<int> labels, GpuView<int> indices, int count)
     {
         using var predictions = gpu.Allocate<int>(count);
         for (int offset = 0; offset < count;)
         {
             int batchCount = Math.Min(BatchSize, count - offset);
             Forward(pixels, labels, indices, offset, batchCount,
-                batchMetrics.View, 0, predictions.View, offset);
+                batchMetrics.DeviceView, 0, predictions.DeviceView, offset);
             offset += batchCount;
         }
         return predictions.ToArray();
@@ -274,29 +273,29 @@ public sealed class GpuNeuralNetwork : IDisposable
     /// <param name="learningRate">The validated positive gradient step size.</param>
     private void TrainBatch(int offset, int count, float learningRate)
     {
-        Forward(trainingPixels.View, trainingLabels.View, order.View, offset, count,
-            batchMetrics.View, 0, batchPredictions.View, 0);
+        Forward(trainingPixels.DeviceView, trainingLabels.DeviceView, order.DeviceView, offset, count,
+            batchMetrics.DeviceView, 0, batchPredictions.DeviceView, 0);
         // Back-propagate through every hidden layer before changing any weights used by its derivatives.
         for (int index = layers.Length - 2; index >= 0; index--)
         {
             GpuNetworkLayer layer = layers[index];
             GpuNetworkLayer next = layers[index + 1];
-            gpu.For(0, count * layer.OutputSize, new BackwardHiddenKernel(layer.Activations.View,
-                next.Deltas.View, next.Weights.View, layer.OutputSize, next.OutputSize, layer.Deltas.View));
+            BackwardOperations.Hidden(gpu, count, layer.Activations.DeviceView, next.Deltas.DeviceView,
+                next.Weights.DeviceView, layer.OutputSize, next.OutputSize, layer.Deltas.DeviceView);
         }
         for (int index = 0; index < layers.Length; index++)
         {
             GpuNetworkLayer layer = layers[index];
             if (index == 0)
-                gpu.For(0, layer.Weights.Length, new UpdateInputWeightsKernel(trainingPixels.View, order.View,
-                    offset, count, layer.OutputSize, layer.Deltas.View, layer.Weights.View, layer.WeightVelocity.View,
-                    learningRate, Momentum, WeightDecay));
+                ParameterUpdateOperations.InputWeights(gpu, trainingPixels.DeviceView, order.DeviceView,
+                    offset, count, layer.OutputSize, layer.Deltas.DeviceView, layer.Weights.DeviceView, layer.WeightVelocity.DeviceView,
+                    learningRate, Momentum, WeightDecay);
             else
-                gpu.For(0, layer.Weights.Length, new UpdateDenseWeightsKernel(layers[index - 1].Activations.View,
-                    layer.Deltas.View, count, layer.InputSize, layer.OutputSize, layer.Weights.View,
-                    layer.WeightVelocity.View, learningRate, Momentum, WeightDecay));
-            gpu.For(0, layer.OutputSize, new UpdateBiasKernel(layer.Deltas.View, layer.OutputSize, count,
-                layer.Bias.View, layer.BiasVelocity.View, learningRate, Momentum));
+                ParameterUpdateOperations.DenseWeights(gpu, layers[index - 1].Activations.DeviceView,
+                    layer.Deltas.DeviceView, count, layer.InputSize, layer.OutputSize, layer.Weights.DeviceView,
+                    layer.WeightVelocity.DeviceView, learningRate, Momentum, WeightDecay);
+            ParameterUpdateOperations.Bias(gpu, layer.Deltas.DeviceView, layer.OutputSize, count,
+                layer.Bias.DeviceView, layer.BiasVelocity.DeviceView, learningRate, Momentum);
         }
     }
 
@@ -310,23 +309,24 @@ public sealed class GpuNeuralNetwork : IDisposable
     /// <param name="metricsOffset">The first batch row's destination in the metric buffer.</param>
     /// <param name="predictions">The predicted digit buffer to write.</param>
     /// <param name="predictionsOffset">The first batch row's destination in the prediction buffer.</param>
-    private void Forward(ArrayView<float> pixels, ArrayView<int> labels, ArrayView<int> indices,
-        int offset, int count, ArrayView<NetworkMetric> metrics, int metricsOffset,
-        ArrayView<int> predictions, int predictionsOffset)
+    private void Forward(GpuView<float> pixels, GpuView<int> labels, GpuView<int> indices,
+        int offset, int count, GpuView<NetworkMetric> metrics, int metricsOffset,
+        GpuView<int> predictions, int predictionsOffset)
     {
         GpuNetworkLayer first = layers[0];
-        gpu.For(0, count * first.OutputSize, new ForwardHiddenKernel(pixels, indices, offset, first.OutputSize,
-            first.Weights.View, first.Bias.View, first.Activations.View));
+        ForwardOperations.Hidden(gpu, count, pixels, indices, offset, first.OutputSize,
+            first.Weights.DeviceView, first.Bias.DeviceView, first.Activations.DeviceView);
         for (int index = 1; index < layers.Length; index++)
         {
             GpuNetworkLayer layer = layers[index];
-            gpu.For(0, count * layer.OutputSize, new ForwardDenseKernel(layers[index - 1].Activations.View,
-                layer.Weights.View, layer.Bias.View, layer.InputSize, layer.OutputSize,
-                index < layers.Length - 1, layer.Activations.View));
+            ForwardOperations.Dense(gpu, count, layers[index - 1].Activations.DeviceView,
+                layer.Weights.DeviceView, layer.Bias.DeviceView, layer.InputSize, layer.OutputSize,
+                index < layers.Length - 1, layer.Activations.DeviceView);
         }
         GpuNetworkLayer output = layers[^1];
-        gpu.For(0, count, new SoftmaxKernel(output.Activations.View, probabilities.View, labels, indices, offset,
-            output.Deltas.View, metrics, metricsOffset, predictions, predictionsOffset));
+        SoftmaxOperations.Compute(gpu, count, output.Activations.DeviceView, probabilities.DeviceView,
+            labels, indices, offset, output.Deltas.DeviceView, metrics, metricsOffset,
+            predictions, predictionsOffset);
     }
 
     /// <summary>Validates selected row indices and copies their order to the persistent device buffer.</summary>

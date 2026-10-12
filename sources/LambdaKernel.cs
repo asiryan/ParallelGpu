@@ -359,7 +359,7 @@ internal sealed class LambdaKernel
 
     /// <summary>Checks whether a type is a supported value or an explicitly owned native device view.</summary>
     /// <param name="type">The candidate scalar type.</param>
-    /// <returns>True for supported values, native append or graph views, or the execution context.</returns>
+    /// <returns>True for supported values, native buffer, append, or graph views, or the execution context.</returns>
     private static bool IsScalar(Type type) => CapturedCollection.IsSupportedElementType(type) || DeviceNativeTypes.IsSupported(type);
 
     /// <summary>Maps captured Boolean and character scalars to blittable kernel argument fields.</summary>

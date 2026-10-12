@@ -1,11 +1,24 @@
+using System.Reflection;
+
 namespace ParallelGpu;
 
-/// <summary>Recognizes native append and object-graph views and the device execution context.</summary>
+/// <summary>Recognizes native buffer, append, and object-graph views and the device execution context.</summary>
 internal static class DeviceNativeTypes
 {
     internal static bool IsSupported(Type type) => type == typeof(DeviceExecutionContext) ||
-        type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(GpuAppendView<>) ||
+        type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(GpuView<>) ||
+            type.GetGenericTypeDefinition() == typeof(GpuAppendView<>) ||
             type.GetGenericTypeDefinition() == typeof(GpuObjectGraphView<>));
+
+    /// <summary>Recognizes buffer element references that do not expose the captured view descriptor.</summary>
+    /// <param name="method">The instance accessor returning a device element reference.</param>
+    /// <returns>True for the ref-returning integer indexer of a native buffer view.</returns>
+    internal static bool IsElementReference(MethodInfo method) =>
+        method.DeclaringType is { IsGenericType: true } declaring &&
+        declaring.GetGenericTypeDefinition() == typeof(GpuView<>) &&
+        !method.IsStatic && method.Name == "get_Item" && method.ReturnType.IsByRef &&
+        method.ReturnType.GetElementType() == declaring.GetGenericArguments()[0] &&
+        method.GetParameters() is [{ ParameterType: var index }] && index == typeof(int);
 
     /// <summary>Checks that lambda value mapping cannot change an explicitly allocated native payload.</summary>
     /// <param name="type">A recognized native view or execution-context type.</param>

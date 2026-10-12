@@ -20,8 +20,8 @@ public sealed partial class Gpu
     /// <para>Captures are refreshed on every call. Deferred loop errors are checked before automatic host
     /// copyback and adapter commits. Empty and reversed ranges skip compilation and execution.</para>
     /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
-    /// Captured append and graph views must be live and owned by this executor. Their result APIs check their
-    /// own deferred errors, and their device writes are not rolled back on a loop failure.</para>
+    /// Captured buffer, append, and graph views must be live and owned by this executor. Their device writes
+    /// are not rolled back on a loop failure; append and graph result APIs check their own deferred errors.</para>
     /// <para>Requires runtime code generation and method IL; Native AOT is unsupported.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>

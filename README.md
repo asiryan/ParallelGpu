@@ -92,22 +92,20 @@ gpu.For(0, slice.Length, i =>
 
 ## Keep data on the device
 
-Automatic loops transfer captured collections on each call. Slices transfer their full backing owner to preserve aliases. For repeated work, upload once, run several kernels, and download once:
+Automatic loops transfer captured collections on each call. Slices transfer their full backing owner to preserve aliases. For repeated work, upload once, use the same lambda API with a device view, and download once:
 
 ```csharp
 using var buffer = gpu.Upload(new float[] { 1, 2, 3 });
-gpu.ForEach(buffer, new ScaleKernel(2));
-gpu.ForEach(buffer, new ScaleKernel(3));
+var values = buffer.DeviceView;
+gpu.For(0, values.Length, i => values[i] *= 2);
+gpu.For(0, values.Length, i => values[i] *= 3);
 float[] scaled = buffer.ToArray();
 // scaled: 6, 12, 18
-
-public readonly struct ScaleKernel(float factor) : IGpuForEachKernel<float>
-{
-    public void Execute(int index, ref float value) => value *= factor;
-}
 ```
 
 `Allocate<T>(length)` creates zero-filled storage. Direct buffers and explicit value kernels require public unmanaged ILGPU-compatible types; they do not apply automatic mappings for private structures, `bool`, `char`, or nullable values.
+
+`buffer.DeviceView` returns a borrowed `GpuView<T>` with `Length` and a ref indexer for loop bodies and explicit kernels. Lambda captures validate its owner and lifetime before execution. Indices must be in range in both modes; device buffer writes are not rolled back on failure. Device views require only `using ParallelGpu`; `buffer.View` remains available for existing backend interoperability.
 
 `CopyFrom(deviceOffset, source, sourceOffset, count)` and `CopyTo(deviceOffset, destination, destinationOffset, count)` transfer array ranges. Offset-only overloads copy an entire array or span (`ReadOnlySpan<T>` for upload, `Span<T>` for download). Copies are synchronous; empty ranges at the buffer end are valid. `CopyFrom(array)` and `CopyTo(array)` still require an exact buffer-length match.
 
@@ -162,9 +160,9 @@ Only the following `Math`/`MathF` signatures are supported. Parameters and retur
 | `Math.Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` |
 | `Math.Min`, `Math.Max`, `Math.Clamp` | The ten numeric types in the values table |
 | `Math.Sqrt`, `Math.Floor`, `Math.Ceiling` | `double` |
-| `Math.CopySign`, `Math.Sin`, `Math.Cos`, `Math.Pow`, `Math.Log` | `double` |
+| `Math.CopySign`, `Math.Sin`, `Math.Cos`, `Math.Pow`, `Math.Exp`, `Math.Log` | `double` |
 | `MathF.Abs`, `MathF.Sqrt`, `MathF.Floor`, `MathF.Ceiling` | `float` |
-| `MathF.CopySign`, `MathF.Min`, `MathF.Max`, `MathF.Sin`, `MathF.Cos`, `MathF.Pow`, `MathF.Log` | `float` |
+| `MathF.CopySign`, `MathF.Min`, `MathF.Max`, `MathF.Sin`, `MathF.Cos`, `MathF.Pow`, `MathF.Exp`, `MathF.Log` | `float` |
 
 Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. The `float`/`double` remainder operator (`%`) supports subnormals, signed zero, NaN, and infinity. `Log` accepts one argument (natural logarithm) or two (explicit base). Transcendental results and intrinsic rounding can differ slightly from CLR execution. Supported math also works in helpers and value constructors; unsupported calls, such as `Round`, are rejected before compilation.
 
@@ -176,7 +174,7 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 - Automatic loops using element references may run in chunks to bound temporary storage. Device collection storage stays shared; host copyback occurs only after every chunk succeeds.
 - Scalar captures are refreshed per call and are read-only in the body. Collection elements are writable; read-only views reject writes. Array/list topology cannot change during an automatic loop.
 - Bounds, null access, absent nullable `Value`, read-only writes, integer division errors, signed `Abs` overflow, inverted `Clamp` bounds, and invalid `ArraySegment` constructor arguments become host exceptions before automatic collection copyback, including through helpers and value constructors. Owned device buffers and callback side effects are not rolled back. Explicit value kernels follow ILGPU's execution contracts.
-- Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native append/graph payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
+- Calls on one executor are serialized. Do not change transferred host collections concurrently. Dispose buffers, append buffers, graphs, and the executor; borrowed views must stay within their owner's lifetime and use the same executor. Native buffer/append/graph view payloads must need no automatic conversion; use `ushort` for characters and `int` for Boolean fields.
 - Unsupported operations include direct managed/reference-bearing values, boxing, reflection, managed allocation, throwing bodies/exception handlers, checked integer arithmetic/conversions, dynamic managed dispatch, delegates, native pointers, and `ref struct` storage. Helpers remain subject to ILGPU and backend restrictions.
 
 # Build and test

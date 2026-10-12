@@ -14,6 +14,8 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
     private readonly Gpu owner;
     /// <summary>The underlying ILGPU allocation released by this buffer.</summary>
     private readonly MemoryBuffer1D<T, Stride1D.Dense> memory;
+    /// <summary>The optional lifetime shared by backend-independent views obtained from this buffer.</summary>
+    private GpuViewLifetime? lifetime;
     /// <summary>Whether the device allocation has been released.</summary>
     private bool disposed;
 
@@ -31,8 +33,9 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
     /// <summary>Gets the number of elements in the buffer.</summary>
     public int Length { get; }
 
-    /// <summary>Gets the device view used by kernels executed by this buffer's owner.</summary>
-    /// <remarks>The view does not own memory and must not outlive the buffer.</remarks>
+    /// <summary>Gets the native backend view for existing ILGPU interoperability.</summary>
+    /// <remarks>The view does not own memory and must not outlive the buffer.
+    /// Use <see cref="DeviceView"/> when kernels should depend only on the ParallelGpu API.</remarks>
     /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
     public ArrayView<T> View
     {
@@ -42,6 +45,23 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
             {
                 ThrowIfDisposed();
                 return memory.View.BaseView;
+            }
+        }
+    }
+
+    /// <summary>Gets the backend-independent device view used by ParallelGpu kernels and loop bodies.</summary>
+    /// <remarks>The view does not own memory. Copied views share this buffer's lifetime; lambda captures
+    /// reject expired and foreign-executor views before launching. Host element access uses the copy methods.</remarks>
+    /// <exception cref="ObjectDisposedException">The buffer or its owner has been disposed.</exception>
+    public GpuView<T> DeviceView
+    {
+        get
+        {
+            lock (owner.SyncRoot)
+            {
+                ThrowIfDisposed();
+                lifetime ??= new GpuViewLifetime(owner);
+                return new(lifetime.Id, memory.View.BaseView);
             }
         }
     }
@@ -232,6 +252,7 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         {
             if (disposed)
                 return;
+            lifetime?.Dispose();
             memory.Dispose();
             disposed = true;
             owner.Release(this);

@@ -23,7 +23,7 @@ internal static class DeviceNumericMethods
         info.ReturnType == (info.DeclaringType == typeof(Math) ? typeof(double) : typeof(float)) &&
         (info.Name switch
         {
-            nameof(Math.Sin) or nameof(Math.Cos) => Matches(info, 1),
+            nameof(Math.Sin) or nameof(Math.Cos) or nameof(Math.Exp) => Matches(info, 1),
             nameof(Math.Pow) => Matches(info, 2),
             nameof(Math.Log) => Matches(info, 1) || Matches(info, 2),
             _ => false,

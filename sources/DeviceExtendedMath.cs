@@ -4,7 +4,7 @@ using ILGPU.Algorithms;
 namespace ParallelGpu;
 
 /// <summary>Lowers supported framework math with double intermediates and explicit exceptional-value handling.</summary>
-/// <remarks>Results are approximate, not necessarily correctly rounded; Pow can differ at underflow and overflow
+/// <remarks>Results are approximate, not necessarily correctly rounded; Exp and Pow can differ at underflow and overflow
 /// boundaries. Floating-point evaluation also depends on ILGPU backend optimizations.</remarks>
 internal static class DeviceExtendedMath
 {
@@ -18,6 +18,8 @@ internal static class DeviceExtendedMath
     public static double SinDouble(double value, DeviceExecutionContext context) => Sin(value);
     public static float CosSingle(float value, DeviceExecutionContext context) => (float)Cos(value);
     public static double CosDouble(double value, DeviceExecutionContext context) => Cos(value);
+    public static float ExpSingle(float value, DeviceExecutionContext context) => (float)Exp(value);
+    public static double ExpDouble(double value, DeviceExecutionContext context) => Exp(value);
     public static float PowSingle(float value, float power, DeviceExecutionContext context) => (float)Pow(value, power);
     public static double PowDouble(double value, double power, DeviceExecutionContext context) => Pow(value, power);
     public static float LogSingle(float value, DeviceExecutionContext context) => (float)Log(value);
@@ -259,6 +261,12 @@ internal static class DeviceExtendedMath
 
     private static double Exp(double value)
     {
+        // Handle NaN and infinities before converting the range-reduction exponent to an integer.
+        ulong magnitude = (ulong)Interop.FloatAsInt(value) & MagnitudeMask;
+        if (magnitude > InfinityBits)
+            return value;
+        if (magnitude == InfinityBits)
+            return value > 0 ? double.PositiveInfinity : 0;
         if (value > 709.782712893384)
             return double.PositiveInfinity;
         if (value < -745.1332191019412)
@@ -270,7 +278,9 @@ internal static class DeviceExtendedMath
         for (int denominator = 18; denominator >= 1; denominator--)
             series = 1 + reduced * series / denominator;
         if (exponent > 1023)
-            return (series * 2) * Interop.IntAsFloat(0x7fe0000000000000UL);
+            // The bounded input permits only exponent 1024 here, with series below one.
+            // Adjust its encoding instead of multiplying constants that a backend can fold to infinity.
+            return Interop.IntAsFloat(Interop.FloatAsInt(series) + ((ulong)exponent << 52));
         if (exponent < -1022)
         {
             double scale = Interop.IntAsFloat((ulong)(exponent + 1022 + 1023) << 52);
