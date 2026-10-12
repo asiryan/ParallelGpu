@@ -1,4 +1,5 @@
 using ILGPU;
+using ILGPU.Runtime;
 using System.Runtime.CompilerServices;
 
 namespace ParallelGpu;
@@ -7,11 +8,17 @@ namespace ParallelGpu;
 /// <remarks>Targets must refer to device memory shared by the participating iterations, such as an array
 /// element. Ordinary captured scalars are read-only. Atomics order accesses to their target; they do not
 /// publish a surrounding object graph or turn unrelated reads and writes into a transaction.
-/// Floating-point updates follow thread arrival order and can vary between runs. Operations delegate to ILGPU;
-/// in ILGPU 1.5.3, floating-point Add/Min/Max with a NaN target may hang on CPU, and CUDA Min/Max may
-/// return an incorrect previous value for a NaN target.</remarks>
+/// Floating-point updates follow thread arrival order and can vary between runs. Floating-point retry loops
+/// compare bit patterns, so NaN targets do not prevent completion. CUDA addition retains its native atomic instruction.</remarks>
 public static class GpuAtomic
 {
+    /// <summary>Selects addition in the floating-point compare-exchange fallback.</summary>
+    private const int AddOperation = 0;
+    /// <summary>Selects the backend's minimum operation in the floating-point fallback.</summary>
+    private const int MinOperation = 1;
+    /// <summary>Selects the backend's maximum operation in the floating-point fallback.</summary>
+    private const int MaxOperation = 2;
+
     /// <summary>Atomically adds a value to the target and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The value used by the operation.</param>
@@ -165,21 +172,22 @@ public static class GpuAtomic
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Add(ref float target, float value) => Atomic.Add(ref target, value);
+    public static float Add(ref float target, float value) => Accelerator.CurrentType == AcceleratorType.Cuda
+        ? Atomic.Add(ref target, value) : UpdateFloating(ref target, value, AddOperation);
 
     /// <summary>Atomically replaces the target with the smaller value and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Min(ref float target, float value) => Atomic.Min(ref target, value);
+    public static float Min(ref float target, float value) => UpdateFloating(ref target, value, MinOperation);
 
     /// <summary>Atomically replaces the target with the larger value and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float Max(ref float target, float value) => Atomic.Max(ref target, value);
+    public static float Max(ref float target, float value) => UpdateFloating(ref target, value, MaxOperation);
 
     /// <summary>Atomically replaces the target and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
@@ -202,21 +210,63 @@ public static class GpuAtomic
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static double Add(ref double target, double value) => Atomic.Add(ref target, value);
+    public static double Add(ref double target, double value) => Accelerator.CurrentType == AcceleratorType.Cuda
+        ? Atomic.Add(ref target, value) : UpdateFloating(ref target, value, AddOperation);
 
     /// <summary>Atomically replaces the target with the smaller value and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static double Min(ref double target, double value) => Atomic.Min(ref target, value);
+    public static double Min(ref double target, double value) => UpdateFloating(ref target, value, MinOperation);
 
     /// <summary>Atomically replaces the target with the larger value and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>
     /// <param name="value">The value used by the operation.</param>
     /// <returns>The previous target value.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static double Max(ref double target, double value) => Atomic.Max(ref target, value);
+    public static double Max(ref double target, double value) => UpdateFloating(ref target, value, MaxOperation);
+
+    /// <summary>Updates a float with bitwise retry checks, avoiding ILGPU 1.5.3's NaN comparison failure.</summary>
+    /// <param name="target">The shared device location.</param>
+    /// <param name="value">The operand used by the update.</param>
+    /// <param name="operation">The addition, minimum, or maximum operation selector.</param>
+    /// <returns>The value held at the location immediately before the successful update.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float UpdateFloating(ref float target, float value, int operation)
+    {
+        float current = Atomic.CompareExchange(ref target, 0f, 0f);
+        while (true)
+        {
+            float updated = operation == AddOperation ? current + value : operation == MinOperation
+                ? IntrinsicMath.Min(current, value) : IntrinsicMath.Max(current, value);
+            float previous = Atomic.CompareExchange(ref target, current, updated);
+            // Floating equality cannot identify a successful NaN CAS and also conflates the two signed zeros.
+            if (Interop.FloatAsInt(previous) == Interop.FloatAsInt(current))
+                return previous;
+            current = previous;
+        }
+    }
+
+    /// <summary>Updates a double with the same NaN-safe, bitwise retry rule as the float overload.</summary>
+    /// <param name="target">The shared device location.</param>
+    /// <param name="value">The operand used by the update.</param>
+    /// <param name="operation">The addition, minimum, or maximum operation selector.</param>
+    /// <returns>The value held at the location immediately before the successful update.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double UpdateFloating(ref double target, double value, int operation)
+    {
+        double current = Atomic.CompareExchange(ref target, 0d, 0d);
+        while (true)
+        {
+            double updated = operation == AddOperation ? current + value : operation == MinOperation
+                ? IntrinsicMath.Min(current, value) : IntrinsicMath.Max(current, value);
+            double previous = Atomic.CompareExchange(ref target, current, updated);
+            if (Interop.FloatAsInt(previous) == Interop.FloatAsInt(current))
+                return previous;
+            current = previous;
+        }
+    }
 
     /// <summary>Atomically replaces the target and returns its previous value.</summary>
     /// <param name="target">The shared device location.</param>

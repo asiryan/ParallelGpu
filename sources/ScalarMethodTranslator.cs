@@ -10,6 +10,10 @@ internal sealed class ScalarMethodTranslator
 {
     /// <summary>The generated type containing translated static helpers.</summary>
     private readonly TypeBuilder helpers;
+    /// <summary>The generated assembly that hosts helpers and mapped static value initializers.</summary>
+    private readonly AssemblyBuilder generatedAssembly;
+    /// <summary>The transitive helper assemblies whose private fields may be read by host initializers.</summary>
+    private readonly HashSet<string> accessAssemblies = new();
     /// <summary>Original methods and constructors mapped to their static device helpers.</summary>
     private readonly Dictionary<MethodBase, MethodInfo> methods = new();
     /// <summary>Readonly static values whose representation changes inside translated helpers.</summary>
@@ -21,6 +25,7 @@ internal sealed class ScalarMethodTranslator
     /// <param name="module">The dynamic module owning the loop and its helpers.</param>
     internal ScalarMethodTranslator(ModuleBuilder module)
     {
+        generatedAssembly = (AssemblyBuilder)module.Assembly;
         helpers = module.DefineType("ScalarHelpers",
             TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
         collections = new CollectionMethodTranslator(helpers);
@@ -147,6 +152,7 @@ internal sealed class ScalarMethodTranslator
     {
         if (methods.TryGetValue(method, out var existing))
             return existing;
+        AllowAccess(method.Module.Assembly);
         var parameters = method.GetParameters().Select(parameter => MapType(parameter.ParameterType));
         if (!method.IsStatic)
             parameters = parameters.Prepend(MapType(method.DeclaringType!.MakeByRefType()));
@@ -225,6 +231,7 @@ internal sealed class ScalarMethodTranslator
                         throw new NotSupportedException("Mapped static helper values must be readonly.");
                     if (!staticValues.TryGetValue(field, out var mapped))
                     {
+                        AllowAccess(field.Module.Assembly);
                         mapped = helpers.DefineField("StaticValue" + staticValues.Count, MapType(field.FieldType),
                             FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
                         staticValues.Add(field, mapped);
@@ -241,12 +248,25 @@ internal sealed class ScalarMethodTranslator
         return replacement;
     }
 
+    /// <summary>Allows generated host initializers to read private values from a transitive helper assembly.</summary>
+    /// <param name="assembly">The assembly owning the translated method or its mapped static field.</param>
+    private void AllowAccess(Assembly assembly)
+    {
+        string name = assembly.GetName().Name!;
+        if (!accessAssemblies.Add(name))
+            return;
+        var attribute = typeof(System.Runtime.CompilerServices.IgnoresAccessChecksToAttribute)
+            .GetConstructor([typeof(string)])!;
+        generatedAssembly.SetCustomAttribute(new CustomAttributeBuilder(attribute, [name]));
+    }
+
     /// <summary>Emits a nullable payload read that defers the absent-value exception to the host.</summary>
     private static void EmitNullableValue(ILGenerator il, MethodInfo method, Action<ILGenerator> emitContext)
     {
         var fields = method.DeclaringType!.GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
-        var present = fields.Single(field => field.FieldType == typeof(bool));
         var value = fields.Single(field => field.Name == "value");
+        // Nullable<Boolean> has two Boolean fields; the payload is not its presence flag.
+        var present = fields.Single(field => field != value && field.FieldType == typeof(bool));
         var available = il.DefineLabel();
         il.Emit(OpCodes.Ldarg_0);
         il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(present));
