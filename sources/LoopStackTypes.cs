@@ -6,6 +6,9 @@ namespace ParallelGpu;
 /// <summary>Tracks IL stack types for collection reference comparisons and guarded integer arithmetic.</summary>
 internal static class LoopStackTypes
 {
+    /// <summary>Marks a join of collection references without a shared supported host type.</summary>
+    private sealed class MergedCollectionReference;
+
     /// <summary>Propagates original evaluation-stack types across reachable instructions and control-flow joins.</summary>
     /// <param name="method">The method supplying argument and local types.</param>
     /// <param name="instructions">Decoded instructions in source order.</param>
@@ -52,7 +55,7 @@ internal static class LoopStackTypes
             for (int i = 0; i < previous.Length; i++)
             {
                 var merged = previous[i] == stack[i] ? previous[i] :
-                    previous[i] == typeof(void) ? stack[i] : stack[i] == typeof(void) ? previous[i] : MergeNumeric(previous[i], stack[i]);
+                    previous[i] == typeof(void) ? stack[i] : stack[i] == typeof(void) ? previous[i] : MergeTypes(previous[i], stack[i]);
                 if (previous[i] != merged)
                 {
                     previous[i] = merged;
@@ -64,20 +67,32 @@ internal static class LoopStackTypes
         }
     }
 
-    private static Type MergeNumeric(Type? left, Type? right)
+    /// <summary>Preserves collection references and integer widths at control-flow joins.</summary>
+    private static Type MergeTypes(Type? left, Type? right)
     {
+        if (IsCollectionReference(left) && IsCollectionReference(right))
+        {
+            if (left!.IsAssignableFrom(right))
+                return left;
+            if (right!.IsAssignableFrom(left))
+                return right;
+            return typeof(MergedCollectionReference);
+        }
         int width = DeviceArithmetic.IntegerWidth(left);
         return width > 0 && width == DeviceArithmetic.IntegerWidth(right)
             ? width == 32 ? typeof(int) : typeof(long) : typeof(object);
     }
+
+    /// <summary>Recognizes source collection references and their merged analysis category.</summary>
+    private static bool IsCollectionReference(Type? type) => type == typeof(MergedCollectionReference) ||
+        type is not null && !type.IsValueType && CapturedCollection.ElementType(type) is not null;
+
     /// <summary>Rewrites null values, null tests, and reference comparisons for translated collection descriptors.</summary>
     /// <returns>True if a replacement was emitted; otherwise false.</returns>
     internal static bool TryEmitReferenceOperation(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Dictionary<int, Label> labels, Action<ILGenerator> emitContext)
     {
         var code = instruction.Code;
-        bool IsCollection(Type? type) => type is not null && !type.IsValueType &&
-            CapturedCollection.ElementType(type) is not null;
         if (code == OpCodes.Ldnull)
         {
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.Null))!);
@@ -85,7 +100,7 @@ internal static class LoopStackTypes
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.WithContext))!);
             return true;
         }
-        if (stack.Length > 0 && IsCollection(stack[^1]) &&
+        if (stack.Length > 0 && IsCollectionReference(stack[^1]) &&
             (code == OpCodes.Brtrue || code == OpCodes.Brtrue_S || code == OpCodes.Brfalse || code == OpCodes.Brfalse_S))
         {
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.IsNull))!);
@@ -93,7 +108,7 @@ internal static class LoopStackTypes
                 labels[(int)instruction.Operand!]);
             return true;
         }
-        if (stack.Length >= 2 && (IsCollection(stack[^1]) || IsCollection(stack[^2])) &&
+        if (stack.Length >= 2 && (IsCollectionReference(stack[^1]) || IsCollectionReference(stack[^2])) &&
             (code == OpCodes.Ceq || code == OpCodes.Cgt_Un || code == OpCodes.Beq || code == OpCodes.Beq_S ||
              code == OpCodes.Bne_Un || code == OpCodes.Bne_Un_S))
         {
@@ -162,6 +177,8 @@ internal static class LoopStackTypes
             type = typeof(void);
         else if (code == OpCodes.Ldlen)
             type = typeof(int);
+        else if (code == OpCodes.Ldelem_Ref && before[^2] == typeof(MergedCollectionReference))
+            type = typeof(MergedCollectionReference);
         else if (code.Name.StartsWith("ldelem.", StringComparison.Ordinal))
             type = before[^2]?.GetElementType() ?? typeof(object);
         else if (code.Name.StartsWith("ldind.", StringComparison.Ordinal))
