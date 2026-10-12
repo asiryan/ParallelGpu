@@ -59,10 +59,29 @@ internal static partial class DeviceExtendedMath
         if (positive < 1e-8)
             return value;
         double reduced = ReduceTanAngle(positive, out int quadrant);
-        double tangent = Sin(reduced) / Cos(reduced);
+        double tangent = TanReduced(reduced);
         if ((quadrant & 1) != 0)
             tangent = -1 / tangent;
         return (Interop.FloatAsInt(value) >> 63) != 0 ? -tangent : tangent;
+    }
+
+    /// <summary>Evaluates sine and cosine on [-pi/4, pi/4] without CORDIC's absolute error near zero.</summary>
+    private static double TanReduced(double reduced)
+    {
+        double square = reduced * reduced;
+        double sineTerm = reduced;
+        double cosineTerm = 1;
+        double sine = reduced;
+        double cosine = 1;
+        // Through degrees 21 and 20, the omitted terms are below 6e-24 on the reduced interval.
+        for (int n = 2; n <= 20; n += 2)
+        {
+            cosineTerm *= -square / ((n - 1) * n);
+            sineTerm *= -square / (n * (n + 1));
+            cosine += cosineTerm;
+            sine += sineTerm;
+        }
+        return sine / cosine;
     }
 
     /// <summary>Retains 128 fractional reduction bits so tangent remains accurate near odd multiples of pi/2.</summary>

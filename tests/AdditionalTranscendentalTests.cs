@@ -40,6 +40,28 @@ public sealed class AdditionalTranscendentalTests(GpuFixture fixture)
     }
 
     [Fact]
+    public void TangentRemainsAccurateAroundSmallArgumentsZerosAndPoles()
+    {
+        double[] centers = [1e-8, 1e-7, 1e-6, Math.PI / 2, Math.PI, 2 * Math.PI];
+        double[] input64 = centers.SelectMany(value => new[]
+        {
+            Math.BitDecrement(value), value, Math.BitIncrement(value), value - 1e-8, value + 1e-8
+        }).SelectMany(value => new[] { value, -value }).ToArray();
+        float[] input32 = centers.SelectMany(value => new[]
+        {
+            MathF.BitDecrement((float)value), (float)value, MathF.BitIncrement((float)value)
+        }).SelectMany(value => new[] { value, -value }).ToArray();
+        double[] output64 = new double[input64.Length];
+        float[] output32 = new float[input32.Length];
+        fixture.Gpu.For(0, input64.Length, i => output64[i] = Math.Tan(input64[i]));
+        fixture.Gpu.For(0, input32.Length, i => output32[i] = MathF.Tan(input32[i]));
+        for (int i = 0; i < input64.Length; i++)
+            AssertDouble(Math.Tan(input64[i]), output64[i], $"Tan({input64[i]:R})");
+        for (int i = 0; i < input32.Length; i++)
+            AssertSingle(MathF.Tan(input32[i]), output32[i], $"Tan({input32[i]:R})");
+    }
+
+    [Fact]
     public void Atan2PreservesEverySignedZeroAndInfiniteQuadrant()
     {
         double[] components = [-0.0, 0.0, -1, 1, double.NegativeInfinity, double.PositiveInfinity, double.NaN];

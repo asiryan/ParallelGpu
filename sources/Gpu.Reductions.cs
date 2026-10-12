@@ -17,7 +17,8 @@ public sealed partial class Gpu
     /// <remarks>The input remains unchanged. Empty input evaluates Identity on the host without
     /// compiling a device kernel; a single element is returned without calling Combine.
     /// Floating-point rounding follows a parallel tree and can differ from a sequential sum or
-    /// between devices with different group sizes.</remarks>
+    /// between devices with different group sizes. Unsupported inline-array and fixed-buffer
+    /// storage is rejected even when the input is empty.</remarks>
     /// <exception cref="ArgumentNullException">The input array is null.</exception>
     /// <exception cref="ArgumentException">An element or operation type is not publicly visible.</exception>
     /// <exception cref="NotSupportedException">The input type contains inline arrays or fixed-buffer storage,
@@ -33,6 +34,7 @@ public sealed partial class Gpu
             ThrowIfDisposed();
             ValidateVisible(typeof(T));
             ValidateVisible(typeof(TOperation));
+            DeviceValueType.ValidateStorage(typeof(T));
             if (data.Length == 0)
                 return operation.Identity;
             using var buffer = Upload(data);
