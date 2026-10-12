@@ -159,7 +159,7 @@ Adapters run on the host; callback failures can leave partial host changes. Grap
 | --- | --- | --- |
 | `Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` | `float` |
 | `Min`, `Max` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` | `float` |
-| `Clamp` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` | — |
+| `Clamp` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` | ❌ |
 | `Sqrt`, `Cbrt`, `Pow`, `Exp`, `Log`, `Log2`, `Log10` | `double` | `float` |
 | `Sin`, `Cos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2` | `double` | `float` |
 | `Sinh`, `Cosh`, `Tanh`, `Asinh`, `Acosh`, `Atanh` | `double` | `float` |
@@ -170,8 +170,8 @@ Adapters run on the host; callback failures can leave partial host changes. Grap
 | `ScaleB` | `(double value, int exponent)` → `double` | `(float value, int exponent)` → `float` |
 | `ILogB` | `double` → `int` | `float` → `int` |
 | `Sign` | `sbyte`, `short`, `int`, `long`, `float`, `double` → `int` | `float` → `int` |
-| `BigMul` | `(int, int)` → `long`; `(long, long, out long low)` → `long` high; `(ulong, ulong, out ulong low)` → `ulong` high | — |
-| `DivRem` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong` → matching `(Quotient, Remainder)` tuple; `int`/`long` also support `out` remainder | — |
+| `BigMul` | `(int, int)` → `long`; `(long, long, out long low)` → `long` high; `(ulong, ulong, out ulong low)` → `ulong` high | ❌ |
+| `DivRem` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong` → matching `(Quotient, Remainder)` tuple; `int`/`long` also support `out` remainder | ❌ |
 
 Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. Both `%` and `IEEERemainder` handle exceptional values and subnormals, with their distinct quotient rules. `Log` accepts one argument (natural logarithm) or two (explicit base). `Round` supports all five `MidpointRounding` modes, validates digits (0–15 for `double`, 0–6 for `float`), and preserves signed zero. `SinCos` and the two-argument `DivRem` return ordinary tuples. `FusedMultiplyAdd` uses portable software arithmetic to round only once across backends; it can cost more than native arithmetic. Transcendental results and reciprocal estimates may differ slightly from CLR execution. Supported math also works in helpers and value constructors. Overloads using `decimal`, `nint`, or `nuint` remain unsupported.
 
