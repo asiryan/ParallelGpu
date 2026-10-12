@@ -313,11 +313,20 @@ internal sealed class ScalarMethodTranslator
         il.Emit(OpCodes.Ldfld, DeviceValueType.MapField(value));
         il.Emit(OpCodes.Ret);
     }
-    /// <summary>Emits stack-compatible narrow conversions, guarded integer division/remainder, or floating remainder.</summary>
+    /// <summary>Emits CLR sizeof constants, stack-compatible narrow conversions, guarded integer division/remainder, or floating remainder.</summary>
     /// <returns>True if a replacement was emitted; false for an instruction requiring no arithmetic lowering.</returns>
     internal static bool TryEmitArithmetic(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Action<ILGenerator> emitContext)
     {
+        if (instruction.Code == OpCodes.Sizeof)
+        {
+            var type = (Type)instruction.Operand!;
+            if (!DeviceValueType.IsSupported(type))
+                throw new NotSupportedException($"sizeof requires a supported unmanaged GPU value type: '{type}'.");
+            // Automatic mirrors can change field widths and packing. Preserve the source CLR size.
+            il.Emit(OpCodes.Ldc_I4, ILGPU.Interop.SizeOf(type));
+            return true;
+        }
         if (DeviceArithmetic.IsNarrowingConversion(instruction.Code))
         {
             // CIL narrows the value but leaves an I4 on the evaluation stack. Keep the
@@ -445,7 +454,8 @@ internal sealed class ScalarMethodTranslator
         if (body.ExceptionHandlingClauses.Count == 0)
         {
             var instructions = LoopIL.Read(method);
-            if (instructions.Any(instruction => DeviceArithmetic.IsNarrowingConversion(instruction.Code)))
+            if (instructions.Any(instruction => instruction.Code == OpCodes.Sizeof ||
+                DeviceArithmetic.IsNarrowingConversion(instruction.Code)))
                 return true;
             if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code)))
             {

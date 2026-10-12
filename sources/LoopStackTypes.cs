@@ -93,6 +93,19 @@ internal static class LoopStackTypes
         Type?[] stack, Dictionary<int, Label> labels, Action<ILGenerator> emitContext)
     {
         var code = instruction.Code;
+        // References to local collection descriptors point to mapped values, not CLR object slots.
+        if (code == OpCodes.Ldind_Ref && stack.Length > 0 && stack[^1]?.IsByRef == true &&
+            IsCollectionReference(stack[^1]!.GetElementType()))
+        {
+            il.Emit(OpCodes.Ldobj, typeof(DeviceCollection));
+            return true;
+        }
+        if (code == OpCodes.Stind_Ref && stack.Length >= 2 && stack[^2]?.IsByRef == true &&
+            IsCollectionReference(stack[^2]!.GetElementType()))
+        {
+            il.Emit(OpCodes.Stobj, typeof(DeviceCollection));
+            return true;
+        }
         if (code == OpCodes.Ldnull)
         {
             il.Emit(OpCodes.Call, typeof(DeviceCollection).GetMethod(nameof(DeviceCollection.Null))!);
@@ -189,6 +202,7 @@ internal static class LoopStackTypes
             type = (Type)instruction.Operand!;
         else if (code.Name.StartsWith("ldc.i4", StringComparison.Ordinal) ||
             code.Name.StartsWith("conv.i4", StringComparison.Ordinal) || code.Name.StartsWith("conv.u4", StringComparison.Ordinal) ||
+            code == OpCodes.Sizeof ||
             code == OpCodes.Conv_I1 || code == OpCodes.Conv_U1 || code == OpCodes.Conv_I2 || code == OpCodes.Conv_U2 ||
             code == OpCodes.Ceq || code == OpCodes.Cgt || code == OpCodes.Cgt_Un || code == OpCodes.Clt || code == OpCodes.Clt_Un)
             type = typeof(int);
