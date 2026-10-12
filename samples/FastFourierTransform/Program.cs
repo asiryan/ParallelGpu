@@ -3,7 +3,7 @@ using System.Numerics;
 using FastFourierTransform;
 using ParallelGpu;
 
-// A 2048 x 2048 matrix of complex doubles occupies 64 MiB.
+// Matrix of complex doubles.
 const int Rows = 4096;
 const int Columns = 4096;
 const bool Normalized = true;
