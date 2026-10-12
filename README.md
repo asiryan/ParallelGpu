@@ -153,22 +153,48 @@ Adapters run on the host; callback failures can leave partial host changes. Grap
 
 ## Framework math
 
-`Math` and `MathF` support the .NET 8 numerical overloads using the ten numeric types in the values table. Floating functions use `double` for `Math` and `float` for `MathF`; `Math.Abs`, `Math.Min`, `Math.Max`, and `Math.Sign` also accept `float`.
+`Math` and `MathF` support the .NET 8 numerical overloads listed below. Unless a row specifies a result separately, the numeric arguments and result use the same listed type.
 
-| Methods | Types |
+| Methods | Argument and result types |
 | --- | --- |
 | `Math.Abs` | `sbyte`, `short`, `int`, `long`, `float`, `double` |
-| `Math.Min`, `Math.Max`, `Math.Clamp` | The ten numeric types in the values table |
+| `Math.Min`, `Math.Max`, `Math.Clamp` | `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double` |
 | `MathF.Abs`, `MathF.Min`, `MathF.Max` | `float` |
-| `Sqrt`, `Cbrt`, `Pow`, `Exp`, `Log`, `Log2`, `Log10` | `float`, `double` |
-| `Sin`, `Cos`, `SinCos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2` | `float`, `double` |
-| `Sinh`, `Cosh`, `Tanh`, `Asinh`, `Acosh`, `Atanh` | `float`, `double` |
-| `Floor`, `Ceiling`, `Truncate`, `Round` (all four overloads) | `float`, `double` |
-| `CopySign`, `IEEERemainder`, `FusedMultiplyAdd`, `MinMagnitude`, `MaxMagnitude` | `float`, `double` |
-| `BitIncrement`, `BitDecrement`, `ScaleB`, `ILogB`, `ReciprocalEstimate`, `ReciprocalSqrtEstimate` | `float`, `double` |
-| `Sign` | `sbyte`, `short`, `int`, `long`, `float`, `double`; returns `int` |
-| `Math.BigMul` | `int` inputs and `long` result; `long`/`ulong` inputs with high result and `out` low bits |
-| `Math.DivRem` | Eight integer types with tuple results; `int`/`long` also support `out` remainder |
+| `Math.Sqrt`, `Math.Cbrt`, `Math.Pow`, `Math.Exp`, `Math.Log`, `Math.Log2`, `Math.Log10` | `double` |
+| `MathF.Sqrt`, `MathF.Cbrt`, `MathF.Pow`, `MathF.Exp`, `MathF.Log`, `MathF.Log2`, `MathF.Log10` | `float` |
+| `Math.Sin`, `Math.Cos`, `Math.Tan`, `Math.Asin`, `Math.Acos`, `Math.Atan`, `Math.Atan2` | `double` |
+| `MathF.Sin`, `MathF.Cos`, `MathF.Tan`, `MathF.Asin`, `MathF.Acos`, `MathF.Atan`, `MathF.Atan2` | `float` |
+| `Math.SinCos` | `double` argument; `(double Sin, double Cos)` result |
+| `MathF.SinCos` | `float` argument; `(float Sin, float Cos)` result |
+| `Math.Sinh`, `Math.Cosh`, `Math.Tanh`, `Math.Asinh`, `Math.Acosh`, `Math.Atanh` | `double` |
+| `MathF.Sinh`, `MathF.Cosh`, `MathF.Tanh`, `MathF.Asinh`, `MathF.Acosh`, `MathF.Atanh` | `float` |
+| `Math.Floor`, `Math.Ceiling`, `Math.Truncate` | `double` |
+| `MathF.Floor`, `MathF.Ceiling`, `MathF.Truncate` | `float` |
+| `Math.Round` (all four overloads) | `double` value; optional `int` digits and/or `MidpointRounding` mode; `double` result |
+| `MathF.Round` (all four overloads) | `float` value; optional `int` digits and/or `MidpointRounding` mode; `float` result |
+| `Math.CopySign`, `Math.IEEERemainder`, `Math.FusedMultiplyAdd`, `Math.MinMagnitude`, `Math.MaxMagnitude` | `double` |
+| `MathF.CopySign`, `MathF.IEEERemainder`, `MathF.FusedMultiplyAdd`, `MathF.MinMagnitude`, `MathF.MaxMagnitude` | `float` |
+| `Math.BitIncrement`, `Math.BitDecrement`, `Math.ReciprocalEstimate`, `Math.ReciprocalSqrtEstimate` | `double` |
+| `MathF.BitIncrement`, `MathF.BitDecrement`, `MathF.ReciprocalEstimate`, `MathF.ReciprocalSqrtEstimate` | `float` |
+| `Math.ScaleB` | `double` value and `int` exponent; `double` result |
+| `MathF.ScaleB` | `float` value and `int` exponent; `float` result |
+| `Math.ILogB` | `double` argument; `int` result |
+| `MathF.ILogB` | `float` argument; `int` result |
+| `Math.Sign` | `sbyte`, `short`, `int`, `long`, `float`, `double` arguments; `int` result |
+| `MathF.Sign` | `float` argument; `int` result |
+| `Math.BigMul` | `(int, int)` arguments; `long` result |
+| `Math.BigMul` | `(long, long, out long low)` arguments; `long` high-bits result |
+| `Math.BigMul` | `(ulong, ulong, out ulong low)` arguments; `ulong` high-bits result |
+| `Math.DivRem` | `(sbyte, sbyte)` arguments; `(sbyte Quotient, sbyte Remainder)` result |
+| `Math.DivRem` | `(byte, byte)` arguments; `(byte Quotient, byte Remainder)` result |
+| `Math.DivRem` | `(short, short)` arguments; `(short Quotient, short Remainder)` result |
+| `Math.DivRem` | `(ushort, ushort)` arguments; `(ushort Quotient, ushort Remainder)` result |
+| `Math.DivRem` | `(int, int)` arguments; `(int Quotient, int Remainder)` result |
+| `Math.DivRem` | `(uint, uint)` arguments; `(uint Quotient, uint Remainder)` result |
+| `Math.DivRem` | `(long, long)` arguments; `(long Quotient, long Remainder)` result |
+| `Math.DivRem` | `(ulong, ulong)` arguments; `(ulong Quotient, ulong Remainder)` result |
+| `Math.DivRem` | `(int, int, out int remainder)` arguments; `int` quotient result |
+| `Math.DivRem` | `(long, long, out long remainder)` arguments; `long` quotient result |
 
 Floating-point `Min`/`Max` preserve .NET NaN and signed-zero behavior; `Clamp` uses ordered comparisons. `CopySign` preserves magnitude bits, including NaN payloads. Both `%` and `IEEERemainder` handle exceptional values and subnormals, with their distinct quotient rules. `Log` accepts one argument (natural logarithm) or two (explicit base). `Round` supports all five `MidpointRounding` modes, validates digits (0–15 for `double`, 0–6 for `float`), and preserves signed zero. `SinCos` and the two-argument `DivRem` return ordinary tuples. `FusedMultiplyAdd` uses portable software arithmetic to round only once across backends; it can cost more than native arithmetic. Transcendental results and reciprocal estimates may differ slightly from CLR execution. Supported math also works in helpers and value constructors. Overloads using `decimal`, `nint`, or `nuint` remain unsupported.
 
