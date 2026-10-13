@@ -172,6 +172,10 @@ internal sealed class LambdaKernel
     /// noncollectible avoids invalid dynamic-method handles; one template is generated per body method.</remarks>
     private static TranslatedBody TranslateBody(MethodInfo source)
     {
+        var parameters = source.GetParameters();
+        if (source.ReturnType != typeof(void) || parameters.Length != 1 || parameters[0].ParameterType != typeof(int))
+            throw new NotSupportedException("GPU loop delegates must target an ordinary void(int) method. " +
+                "Closed static delegates with bound arguments are not supported.");
         var instructions = LoopIL.Read(source);
         var sourceBody = source.GetMethodBody()!;
         var stackTypes = LoopStackTypes.Analyze(source, instructions);

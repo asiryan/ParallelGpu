@@ -19,8 +19,17 @@ internal static class LoopIL
     /// <exception cref="NotSupportedException">The body is unavailable, contains exception handlers, or uses an unsupported operand format.</exception>
     internal static List<LoopInstruction> Read(MethodBase method)
     {
-        var body = method.GetMethodBody() ??
-            throw new NotSupportedException("The loop body must have ordinary managed C# code.");
+        MethodBody? body;
+        try
+        {
+            body = method.GetMethodBody();
+        }
+        catch (Exception error) when (error is InvalidOperationException or NotSupportedException)
+        {
+            throw new NotSupportedException("The loop body must have ordinary managed C# code with inspectable IL.", error);
+        }
+        if (body is null)
+            throw new NotSupportedException("The loop body must have ordinary managed C# code with inspectable IL.");
         if (body.ExceptionHandlingClauses.Count != 0)
             throw new NotSupportedException("try/catch/finally is not supported inside GPU loops.");
         var bytes = body.GetILAsByteArray()!;

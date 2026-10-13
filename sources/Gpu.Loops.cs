@@ -36,7 +36,8 @@ public sealed partial class Gpu
     /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
     /// Captured buffer, append, and graph views must be live and owned by this executor. Their device writes
     /// are not rolled back on a loop failure; append and graph result APIs check their own deferred errors.</para>
-    /// <para>Requires runtime code generation and method IL; Native AOT is unsupported.</para>
+    /// <para>Requires an ordinary void(int) method with inspectable IL and runtime code generation.
+    /// Closed static delegates with bound arguments, DynamicMethod delegates, and Native AOT are unsupported.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
     /// <exception cref="ArgumentException">An intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, a rounding mode is invalid, or an ArraySegment constructor range exceeds its array.</exception>
