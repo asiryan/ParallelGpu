@@ -28,6 +28,8 @@ internal sealed class LambdaKernel
     private readonly FieldInfo contextField;
     /// <summary>The field mappings used to read current closure values on every invocation.</summary>
     private readonly LoopCapture[] captures;
+    /// <summary>Whether adapter callbacks can invalidate native views captured by this body.</summary>
+    private readonly bool revalidateNativeCaptures;
     /// <summary>The accelerator-bound launcher accepting an iteration count, lower bound, and boxed state.</summary>
     private readonly Action<int, int, object> launch;
     /// <summary>The largest mapped element size needed for a deferred invalid reference.</summary>
@@ -43,6 +45,8 @@ internal sealed class LambdaKernel
         this.stateType = stateType;
         contextField = stateType.GetField("Context")!;
         this.captures = captures;
+        revalidateNativeCaptures = captures.Any(capture => capture.Element is not null) &&
+            captures.Any(capture => DeviceNativeTypes.IsSupported(capture.Path[^1].FieldType));
         this.launch = launch;
         this.scratchElementSize = scratchElementSize;
     }
@@ -69,7 +73,9 @@ internal sealed class LambdaKernel
     internal void Execute(Gpu gpu, Action<int> body, int start, int count, Type? expectedElement)
     {
         // Validate collection types and native view ownership before device allocation.
-        var values = captures.Select(capture => capture.Read(body.Target)).ToArray();
+        var values = captures.Length == 0 ? Array.Empty<object?>() : new object?[captures.Length];
+        for (int i = 0; i < captures.Length; i++)
+            values[i] = captures[i].Read(body.Target);
         for (int i = 0; i < captures.Length; i++)
         {
             var capture = captures[i];
@@ -82,8 +88,8 @@ internal sealed class LambdaKernel
                     $"but For<{expectedElement.Name}> requires that element type. " +
                     "Use the non-generic For overload for mixed collection types.", nameof(body));
             if (capture.Element is not null && values[i] is not null && values[i] is not Array &&
-                !GpuCollectionAdapters.SupportsRuntime(values[i]!.GetType()) &&
-                !typeof(List<>).MakeGenericType(capture.Element).IsInstanceOfType(values[i]))
+                !capture.NativeListType!.IsInstanceOfType(values[i]) &&
+                !GpuCollectionAdapters.SupportsRuntime(values[i]!.GetType()))
                 throw new NotSupportedException(
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
         }
@@ -92,6 +98,12 @@ internal sealed class LambdaKernel
         for (int i = 0; i < captures.Length; i++)
             if (captures[i].Element is Type element)
                 values[i] = transfers.Add(values[i]!, element, captures[i].Path[^1].FieldType);
+        // A capture callback may dispose another captured buffer after its first check.
+        // Bodies without collection callbacks keep the single-validation fast path.
+        if (revalidateNativeCaptures)
+            foreach (var value in values)
+                if (value is IDeviceNativeView nativeView)
+                    nativeView.ValidateOwner(gpu);
         // Adapter capture callbacks can reenter this executor. Reset shared errors only
         // after they return, so a caught nested failure cannot taint this invocation.
         var errors = gpu.PrepareLoopErrors();
@@ -110,7 +122,8 @@ internal sealed class LambdaKernel
                     CapturedCollection collection => collection.View,
                     bool value when captures[i].Path[^1].FieldType == typeof(bool) => value ? 1 : 0,
                     char value when captures[i].Path[^1].FieldType == typeof(char) => (int)value,
-                    _ => DeviceValueType.ToDevice(values[i], captures[i].Path[^1].FieldType)
+                    _ => captures[i].Destination.FieldType == captures[i].Path[^1].FieldType
+                        ? values[i] : DeviceValueType.ToDevice(values[i], captures[i].Path[^1].FieldType)
                 });
 
         // Captures and device collections remain shared across launches. Copyback occurs only
