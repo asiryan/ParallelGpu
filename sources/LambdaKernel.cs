@@ -219,6 +219,11 @@ internal sealed class LambdaKernel
         {
             var instruction = instructions[i];
             il.MarkLabel(labels[instruction.Offset]);
+            // Static captures are read on the host. Their volatile prefix cannot precede
+            // the generated state-argument load that replaces the original field read.
+            if (instruction.Code == OpCodes.Volatile && i + 1 < instructions.Count &&
+                instructions[i + 1].Code == OpCodes.Ldsfld)
+                continue;
             if (LoopFailureGuard.IsBackwardBranch(instruction) &&
                 stackTypes.TryGetValue(instruction.Offset, out var branchStack))
                 scalarMethods.FailureGuard.Emit(il, branchStack.Length, typeof(void), emitContext);
@@ -232,7 +237,16 @@ internal sealed class LambdaKernel
                 // Collapse a closure field chain only when no branch can enter it partway through.
                 while (fields.Count == 0 || !IsCaptureType(fields[^1].FieldType))
                 {
-                    if (++i >= instructions.Count ||
+                    i++;
+                    if (i < instructions.Count && instructions[i].Code == OpCodes.Volatile &&
+                        !branches.Contains(instructions[i].Offset))
+                    {
+                        // Host snapshot reads collapse managed capture paths, including
+                        // volatile fields; device value-field prefixes remain unchanged.
+                        il.MarkLabel(labels[instructions[i].Offset]);
+                        i++;
+                    }
+                    if (i >= instructions.Count ||
                         (instructions[i].Code != OpCodes.Ldfld && instructions[i].Code != OpCodes.Ldflda) ||
                         branches.Contains(instructions[i].Offset))
                         throw Unsupported("Managed objects and mutation of captured scalar variables");

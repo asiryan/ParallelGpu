@@ -59,7 +59,7 @@ Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.
 
 The automatic lambda API requires runtime code generation (`Reflection.Emit`) and access to method IL. Delegates must target an ordinary `void Method(int)`; closed static delegates with bound arguments and `DynamicMethod` delegates are unsupported. It is not supported in [Native AOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) applications.
 
-Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Scalars captured by a lambda are read-only; collection elements may be writable, but collection sizes and array topology cannot change during execution.
+Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Scalar captures, including volatile fields, use host snapshots refreshed per call and are read-only; collection elements may be writable, but collection sizes and array topology cannot change during execution.
 
 Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Automatic structure mappings cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. Direct device buffers and explicit value kernels require public unmanaged ILGPU-compatible types.
 

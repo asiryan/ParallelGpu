@@ -31,7 +31,8 @@ public sealed partial class Gpu
     /// or structures without managed references. Aliases and array lower bounds are preserved.
     /// Constructors and compatible helpers accept values and collections. Captured descriptors and scalar values
     /// are read-only. Explicit layouts and native pointer fields are unsupported.</para>
-    /// <para>Captures are refreshed on every call. Deferred loop errors are checked before automatic host
+    /// <para>Captures, including volatile fields, use host snapshots refreshed on every call.
+    /// Deferred loop errors are checked before automatic host
     /// copyback and adapter commits. Empty and reversed ranges skip compilation and execution.</para>
     /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
     /// Captured buffer, append, and graph views must be live and owned by this executor. Their device writes
