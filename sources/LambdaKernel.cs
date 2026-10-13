@@ -196,10 +196,11 @@ internal sealed class LambdaKernel
             var instruction = instructions[i];
             il.MarkLabel(labels[instruction.Offset]);
             var argument = LoopIL.Argument(instruction);
-            if ((!source.IsStatic && argument == 0) || instruction.Code == OpCodes.Ldsfld)
+            if ((!source.IsStatic && argument == 0) ||
+                instruction.Code == OpCodes.Ldsfld || instruction.Code == OpCodes.Ldsflda)
             {
                 var fields = new List<FieldInfo>();
-                if (instruction.Code == OpCodes.Ldsfld)
+                if (instruction.Code == OpCodes.Ldsfld || instruction.Code == OpCodes.Ldsflda)
                     fields.Add((FieldInfo)instruction.Operand!);
                 // Collapse a closure field chain only when no branch can enter it partway through.
                 while (fields.Count == 0 || !IsCaptureType(fields[^1].FieldType))
@@ -222,7 +223,7 @@ internal sealed class LambdaKernel
                         MapCaptureType(type), FieldAttributes.Public), CapturedCollection.ElementType(type));
                     paths.Add(key, capture);
                 }
-                bool address = instructions[i].Code == OpCodes.Ldflda;
+                bool address = instructions[i].Code == OpCodes.Ldflda || instructions[i].Code == OpCodes.Ldsflda;
                 if (address)
                     ReadOnlyCapture.Validate(instructions, i, capture.Element is not null);
                 il.Emit(OpCodes.Ldarg_0);

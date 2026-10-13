@@ -245,6 +245,18 @@ internal sealed class ScalarMethodTranslator
                 EmitCall(il, called, emitContext, receiverType);
                 continue;
             }
+            if (DeviceInstructionValidation.IsReadOnlyScalarAddress(instruction))
+            {
+                // Helpers read a snapshot, without exposing a host static address to the device compiler.
+                var staticField = (FieldInfo)instruction.Operand!;
+                AllowAccess(staticField.Module.Assembly);
+                var stored = StaticReadOnlyValue(staticField);
+                var copy = il.DeclareLocal(stored.FieldType);
+                il.Emit(OpCodes.Ldsfld, stored);
+                il.Emit(OpCodes.Stloc, copy);
+                il.Emit(OpCodes.Ldloca, copy);
+                continue;
+            }
             DeviceInstructionValidation.Validate(instruction);
             if (instruction.Operand is FieldInfo field)
             {
@@ -260,14 +272,7 @@ internal sealed class ScalarMethodTranslator
                 {
                     if (instruction.Code != OpCodes.Ldsfld || !field.IsInitOnly)
                         throw new NotSupportedException("Mapped static helper values must be readonly.");
-                    if (!staticValues.TryGetValue(field, out var mapped))
-                    {
-                        AllowAccess(field.Module.Assembly);
-                        mapped = helpers.DefineField("StaticValue" + staticValues.Count, MapType(field.FieldType),
-                            FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
-                        staticValues.Add(field, mapped);
-                    }
-                    il.Emit(OpCodes.Ldsfld, mapped);
+                    il.Emit(OpCodes.Ldsfld, StaticReadOnlyValue(field));
                 }
                 else
                     il.Emit(instruction.Code, DeviceValueType.MapField(field));
@@ -277,6 +282,24 @@ internal sealed class ScalarMethodTranslator
                 ? instruction with { Operand = MapType(type) } : instruction, labels);
         }
         return replacement;
+    }
+
+    /// <summary>Gets readonly host storage or its initialized device mirror for a scalar helper value.</summary>
+    /// <param name="field">The readonly scalar source field.</param>
+    /// <returns>The original field or a generated readonly field using the mapped representation.</returns>
+    private FieldInfo StaticReadOnlyValue(FieldInfo field)
+    {
+        Type mappedType = MapType(field.FieldType);
+        if (mappedType == field.FieldType)
+            return field;
+        if (!staticValues.TryGetValue(field, out var mapped))
+        {
+            AllowAccess(field.Module.Assembly);
+            mapped = helpers.DefineField("StaticValue" + staticValues.Count, mappedType,
+                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+            staticValues.Add(field, mapped);
+        }
+        return mapped;
     }
 
     /// <summary>Allows generated host initializers to read private values from a transitive helper assembly.</summary>
@@ -455,6 +478,7 @@ internal sealed class ScalarMethodTranslator
         {
             var instructions = LoopIL.Read(method);
             if (instructions.Any(instruction => instruction.Code == OpCodes.Sizeof ||
+                DeviceInstructionValidation.IsReadOnlyScalarAddress(instruction) ||
                 DeviceArithmetic.IsNarrowingConversion(instruction.Code)))
                 return true;
             if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code)))

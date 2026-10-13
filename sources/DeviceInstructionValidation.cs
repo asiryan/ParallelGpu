@@ -21,6 +21,28 @@ internal static class DeviceInstructionValidation
             throw new NotSupportedException($"Instruction '{code.Name}' requires managed runtime behavior inside a GPU helper. Use explicit GPU storage and device-compatible value operations.");
     }
 
+    /// <summary>Recognizes readonly scalar addresses that helpers can consume through a local value copy.</summary>
+    /// <param name="instruction">The original static-field address load.</param>
+    /// <returns>True for supported readonly scalar values, excluding collections and native device views.</returns>
+    internal static bool IsReadOnlyScalarAddress(LoopInstruction instruction) =>
+        instruction.Code == OpCodes.Ldsflda && instruction.Operand is FieldInfo field &&
+        field.IsStatic && field.IsInitOnly && !ContainsNativeView(field.FieldType, new HashSet<Type>()) &&
+        DeviceValueType.IsSupported(field.FieldType) && CapturedCollection.ElementType(field.FieldType) is null;
+
+    /// <summary>Recognizes borrowed native views inside value wrappers without reading static values.</summary>
+    /// <param name="type">The declared static field or nested instance field type.</param>
+    /// <param name="visited">Types already inspected along the value layout.</param>
+    /// <returns>True when a native view occurs directly or inside a value-type field.</returns>
+    private static bool ContainsNativeView(Type type, HashSet<Type> visited)
+    {
+        if (DeviceNativeTypes.IsSupported(type))
+            return true;
+        if (!type.IsValueType || type.IsPrimitive || type.IsEnum || !visited.Add(type))
+            return false;
+        return type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Any(field => ContainsNativeView(field.FieldType, visited));
+    }
+
     /// <summary>Validates transitive helper calls, leaving recognized framework and ILGPU operations to their translators.</summary>
     /// <param name="method">The method or constructor to inspect.</param>
     /// <param name="visited">The methods already inspected, including recursive references.</param>
@@ -37,9 +59,17 @@ internal static class DeviceInstructionValidation
             return;
         if (method.GetMethodBody() is null)
             return;
-        foreach (var instruction in LoopIL.Read(method))
+        var instructions = LoopIL.Read(method);
+        for (int index = 0; index < instructions.Count; index++)
         {
-            Validate(instruction);
+            var instruction = instructions[index];
+            if (instruction.Operand is FieldInfo native && native.IsStatic &&
+                ContainsNativeView(native.FieldType, new HashSet<Type>()))
+                throw new NotSupportedException($"GPU helper '{method.Name}' captures static native GPU view storage '{native.Name}'. Pass the view as an explicit helper parameter or capture it in the loop body.");
+            if (IsReadOnlyScalarAddress(instruction))
+                ReadOnlyCapture.Validate(instructions, index);
+            else
+                Validate(instruction);
             if (instruction.Operand is FieldInfo field && field.IsStatic &&
                 CapturedCollection.ElementType(field.FieldType) is not null)
                 throw new NotSupportedException($"GPU helper '{method.Name}' captures static collection '{field.Name}'. Pass the collection as an explicit helper parameter.");
