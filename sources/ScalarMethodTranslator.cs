@@ -234,7 +234,6 @@ internal sealed class ScalarMethodTranslator
             {
                 emitContext(il);
                 il.Emit(OpCodes.Call, typeof(DeviceCollectionSlice).GetMethod(nameof(DeviceCollectionSlice.Initialize))!);
-                GuardAfter();
                 continue;
             }
             if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
@@ -243,7 +242,8 @@ internal sealed class ScalarMethodTranslator
             if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
                 TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
             {
-                GuardAfter();
+                if (LoopFailureGuard.RequiredAfterArithmetic(instruction, arithmeticStack))
+                    GuardAfter();
                 continue;
             }
             if (LambdaKernel.TryArrayOperation(il, instruction))
@@ -266,7 +266,8 @@ internal sealed class ScalarMethodTranslator
                     stackTypes.TryGetValue(instruction.Offset, out var receiverStack) &&
                     receiverStack.Length >= receiverOffset ? receiverStack[^receiverOffset] : null;
                 EmitCall(il, called, emitContext, receiverType);
-                GuardAfter();
+                if (LoopFailureGuard.RequiredAfterCall(called))
+                    GuardAfter();
                 continue;
             }
             if (DeviceInstructionValidation.IsReadOnlyScalarAddress(instruction))

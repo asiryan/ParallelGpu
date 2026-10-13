@@ -87,6 +87,27 @@ internal sealed class LoopFailureGuard
             : instruction.Code.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget &&
                 (int)instruction.Operand! <= instruction.Offset;
 
+    /// <summary>Retains post-operation exits for integer division and remainder, which can record deferred errors.</summary>
+    /// <param name="instruction">The source arithmetic instruction already lowered by the translator.</param>
+    /// <param name="stack">The source evaluation-stack types before the instruction.</param>
+    /// <returns>True for guarded integer division or remainder; false for pure arithmetic replacements.</returns>
+    internal static bool RequiredAfterArithmetic(LoopInstruction instruction, Type?[] stack) =>
+        DeviceArithmetic.IsDivision(instruction.Code) && stack.Length >= 2 &&
+        DeviceArithmetic.IntegerWidth(stack[^2]) > 0;
+
+    /// <summary>Omits error reads after known pure calls while retaining exits after unknown helpers and constructors.</summary>
+    /// <param name="method">The original method or constructor emitted by the translator.</param>
+    /// <returns>False only for native buffer accessors that cannot record automatic-loop errors.</returns>
+    internal static bool RequiredAfterCall(MethodBase method)
+    {
+        if (method is MethodInfo info && info.DeclaringType is { IsGenericType: true } declaring &&
+            declaring.GetGenericTypeDefinition() == typeof(GpuView<>) && !info.IsStatic &&
+            (DeviceNativeTypes.IsElementReference(info) ||
+             info.Name == "get_Length" && info.ReturnType == typeof(int) && info.GetParameters().Length == 0))
+            return false;
+        return true;
+    }
+
     /// <summary>Computes the evaluation-stack size after an operation that may record a failure.</summary>
     internal static int StackAfter(LoopInstruction instruction, int before)
     {

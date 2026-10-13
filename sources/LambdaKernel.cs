@@ -24,6 +24,8 @@ internal sealed class LambdaKernel
 
     /// <summary>The generated value type containing device views and captured scalar values.</summary>
     private readonly Type stateType;
+    /// <summary>The generated invocation-context field, resolved once when the kernel is loaded.</summary>
+    private readonly FieldInfo contextField;
     /// <summary>The field mappings used to read current closure values on every invocation.</summary>
     private readonly LoopCapture[] captures;
     /// <summary>The accelerator-bound launcher accepting an iteration count, lower bound, and boxed state.</summary>
@@ -39,6 +41,7 @@ internal sealed class LambdaKernel
     private LambdaKernel(Type stateType, LoopCapture[] captures, Action<int, int, object> launch, int scratchElementSize)
     {
         this.stateType = stateType;
+        contextField = stateType.GetField("Context")!;
         this.captures = captures;
         this.launch = launch;
         this.scratchElementSize = scratchElementSize;
@@ -85,19 +88,21 @@ internal sealed class LambdaKernel
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
         }
         var state = Activator.CreateInstance(stateType)!;
-        using var errors = gpu.Allocate<int>(1);
         using var transfers = new CollectionTransfers(gpu);
         for (int i = 0; i < captures.Length; i++)
             if (captures[i].Element is Type element)
                 values[i] = transfers.Add(values[i]!, element, captures[i].Path[^1].FieldType);
+        // Adapter capture callbacks can reenter this executor. Reset shared errors only
+        // after they return, so a caught nested failure cannot taint this invocation.
+        var errors = gpu.PrepareLoopErrors();
         // All supported primitive leaves require at most eight-byte alignment.
         int scratchStride = checked((scratchElementSize + 7) & ~7);
         int chunkLength = scratchStride == 0 ? count : Math.Min(count, Math.Max(1, MaximumScratchBytes / scratchStride));
-        using var scratch = gpu.Allocate<byte>(checked(chunkLength * scratchStride));
-        var execution = new DeviceExecutionContext(errors.View, scratch.View, scratchStride);
+        using var scratch = scratchStride == 0 ? null : gpu.Allocate<byte>(checked(chunkLength * scratchStride));
+        var execution = new DeviceExecutionContext(errors.View, scratch?.View ?? default, scratchStride);
         transfers.Context = execution;
         transfers.Upload();
-        stateType.GetField("Context")!.SetValue(state, execution);
+        contextField.SetValue(state, execution);
         for (int i = 0; i < captures.Length; i++)
             captures[i].Destination.SetValue(state,
                 values[i] switch
@@ -110,12 +115,14 @@ internal sealed class LambdaKernel
 
         // Captures and device collections remain shared across launches. Copyback occurs only
         // after every chunk succeeds, so a later failure cannot commit an earlier chunk's writes.
+        Span<int> errorCode = stackalloc int[1];
         for (int completed = 0; completed < count;)
         {
             int currentCount = Math.Min(chunkLength, count - completed);
             launch(currentCount, checked(start + completed), state);
-            gpu.Synchronize();
-            DeviceExecutionContext.ThrowIfFailed(errors.ToArray()[0]);
+            // The synchronous copy waits for this launch on the same default stream.
+            errors.CopyTo(0, errorCode);
+            DeviceExecutionContext.ThrowIfFailed(errorCode[0]);
             completed += currentCount;
         }
         transfers.CopyBack();
@@ -270,7 +277,8 @@ internal sealed class LambdaKernel
             if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
                 ScalarMethodTranslator.TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
             {
-                EmitFailureGuard(instruction);
+                if (LoopFailureGuard.RequiredAfterArithmetic(instruction, arithmeticStack))
+                    EmitFailureGuard(instruction);
                 continue;
             }
             if (TryArrayOperation(il, instruction))
@@ -289,7 +297,8 @@ internal sealed class LambdaKernel
                         ? callStack[callStack.Length - called.GetParameters().Length - 1] : null;
                     scalarMethods.EmitCall(il, called, emitContext, receiver);
                 }
-                EmitFailureGuard(instruction);
+                if (LoopFailureGuard.RequiredAfterCall((MethodBase)instruction.Operand!))
+                    EmitFailureGuard(instruction);
                 continue;
             }
             if (instruction.Code == OpCodes.Newobj)

@@ -6,6 +6,20 @@ public sealed partial class Gpu
 {
     /// <summary>Compiled lambda kernels cached by body method; closure values are read separately on each call.</summary>
     private readonly Dictionary<MethodInfo, LambdaKernel> lambdaKernels = new();
+    /// <summary>The shared deferred-error slot for automatic loops serialized by SyncRoot.</summary>
+    private GpuBuffer<int>? loopErrors;
+
+    /// <summary>Resets the executor's reusable error slot before one automatic-loop invocation.</summary>
+    /// <returns>The owned single-element buffer, released when the executor is disposed.</returns>
+    /// <remarks>The caller holds SyncRoot until kernel completion and error validation.</remarks>
+    internal GpuBuffer<int> PrepareLoopErrors()
+    {
+        if (loopErrors is null)
+            loopErrors = Allocate<int>(1);
+        else
+            loopErrors.Clear();
+        return loopErrors;
+    }
 
     /// <summary>Compiles an ordinary C# loop body and executes it for each index in a half-open range.</summary>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>

@@ -80,6 +80,17 @@ public sealed class GpuBuffer<T> : IDisposable where T : unmanaged
         }
     }
 
+    /// <summary>Clears internal reusable storage on the default stream before the next kernel launch.</summary>
+    internal void Clear()
+    {
+        lock (owner.SyncRoot)
+        {
+            ThrowIfDisposed();
+            if (Length > 0)
+                memory.MemSetToZero();
+        }
+    }
+
     /// <summary>Replaces the buffer contents with data from a host array.</summary>
     /// <param name="source">An array whose length equals <see cref="Length"/>.</param>
     /// <exception cref="ArgumentNullException">The source array is null.</exception>

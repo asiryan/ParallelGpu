@@ -199,7 +199,8 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     internal void Upload()
     {
         // Only leaves marked as written, including writable ref accesses, need copyback.
-        writeBuffer = gpu.Allocate<int>(collectionCount);
+        if (collectionCount > 0)
+            writeBuffer = gpu.Allocate<int>(collectionCount);
         if (shapes.Count > 0)
             shapeBuffer = gpu.Upload(shapes.ToArray());
         if (rows.Count > 0)
@@ -213,7 +214,9 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// Each written adapter storage identity is committed at most once.</remarks>
     internal void CopyBack()
     {
-        int[] written = writeBuffer!.ToArray();
+        if (writeBuffer is null)
+            return;
+        int[] written = writeBuffer.ToArray();
         foreach (var batch in batches.Values)
             batch.CopyBack(written);
         foreach (var commit in adapterCommits.Values)
