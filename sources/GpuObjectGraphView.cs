@@ -6,7 +6,7 @@ namespace ParallelGpu;
 /// <typeparam name="TRecord">The unmanaged, ILGPU-supported payload type.</typeparam>
 /// <remarks>Null, shared references, and cycles use stable graph-specific handles. Existing records
 /// and links may be edited; concurrent creation reserves distinct records and reference ranges. New objects must be
-/// read only in a later kernel, after their creating kernel has completed. Concurrent changes to
+/// read by other iterations only in a later kernel, after their creating kernel has completed. Concurrent changes to
 /// the same payload, reference slot, or root still require synchronization by the caller.
 /// Invalid references and capacity exhaustion are recorded and rejected on host download. Lambda
 /// captures validate ownership and lifetime before launch and require a public payload that needs no

@@ -2,7 +2,7 @@ using System.Diagnostics;
 using ParallelGpu;
 using SemiPrimeFactorization;
 
-// Set a positive long SemiPrime and the GPU batch size here.
+// Set the semiprime Number and the GPU batch size here.
 const long Number = 1_000_000_016_000_000_063;
 const int BatchSize = 1_048_576;
 TimeSpan budget = TimeSpan.FromSeconds(30);

@@ -2,7 +2,7 @@ using ILGPU;
 
 namespace ParallelGpu;
 
-/// <summary>Implements exact binary-format operations without relying on host floating-point modes.</summary>
+/// <summary>Provides bit-based IEEE operations and floating-point reciprocal estimates.</summary>
 internal static partial class DeviceExtendedMath
 {
     public static float BitIncrementSingle(float value, DeviceExecutionContext context) =>

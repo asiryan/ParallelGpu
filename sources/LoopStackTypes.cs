@@ -154,7 +154,7 @@ internal static class LoopStackTypes
             Check(stack[^1], field.FieldType);
     }
 
-    /// <summary>Rewrites null values, null tests, and reference comparisons for translated collection descriptors.</summary>
+    /// <summary>Rewrites descriptor reference loads/stores, null values, null tests, and collection reference comparisons.</summary>
     /// <returns>True if a replacement was emitted; otherwise false.</returns>
     internal static bool TryEmitReferenceOperation(ILGenerator il, LoopInstruction instruction,
         Type?[] stack, Dictionary<int, Label> labels, Action<ILGenerator> emitContext)

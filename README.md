@@ -105,7 +105,7 @@ float[] scaled = buffer.ToArray();
 // scaled: 6, 12, 18
 ```
 
-`Allocate<T>(length)` creates zero-filled storage. Direct buffers and explicit value kernels require public unmanaged ILGPU-compatible types; they do not apply automatic mappings for private structures, `bool`, `char`, or nullable values.
+`Allocate<T>(length)` creates zero-filled storage. Buffers require unmanaged ILGPU-compatible types; explicit kernel types, `ForEach`/`Reduce` elements, and lambda native-view payloads must be public. They do not apply automatic mappings for private structures, `bool`, `char`, or nullable values.
 
 `buffer.DeviceView` returns a borrowed `GpuView<T>` with `Length` and a ref indexer for loop bodies and explicit kernels. Lambda captures validate its owner and lifetime before execution. Indices must be in range in both modes; device buffer writes are not rolled back on failure. Device views require only `using ParallelGpu`; `buffer.View` remains available for existing backend interoperability.
 
@@ -202,7 +202,7 @@ dotnet run --project samples/FastFourierTransform -c Release
 dotnet run --project samples/PasswordHashSearch -c Release
 dotnet run --project samples/MonteCarloPi -c Release
 dotnet run --project samples/SemiPrimeFactorization -c Release
-dotnet run --project samples/DigitRecognizer -c Release
+dotnet run --project samples/DigitRecognizer -c Release # requires .artifacts/digit-recognizer.zip
 dotnet run --project samples/Mandelbrot -c Release
 dotnet run --project samples/RayTracer -c Release
 ```

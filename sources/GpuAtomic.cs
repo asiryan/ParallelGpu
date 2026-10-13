@@ -9,7 +9,8 @@ namespace ParallelGpu;
 /// element. Ordinary captured scalars are read-only. Atomics order accesses to their target; they do not
 /// publish a surrounding object graph or turn unrelated reads and writes into a transaction.
 /// Floating-point updates follow thread arrival order and can vary between runs. Floating-point retry loops
-/// compare bit patterns, so NaN targets do not prevent completion. CUDA addition retains its native atomic instruction.</remarks>
+/// compare bit patterns, so NaN targets do not prevent completion. Floating-point Min and Max follow the
+/// backend's NaN and signed-zero semantics. CUDA addition retains its native atomic instruction.</remarks>
 public static class GpuAtomic
 {
     /// <summary>Selects addition in the floating-point compare-exchange fallback.</summary>

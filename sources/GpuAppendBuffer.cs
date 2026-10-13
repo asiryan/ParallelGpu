@@ -122,7 +122,7 @@ public sealed class GpuAppendBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>Gets the number of successfully reserved output slots.</summary>
-    /// <remarks>The count saturates at Capacity. Query it only after a synchronous kernel call.</remarks>
+    /// <remarks>The count saturates at Capacity. The host read is synchronous.</remarks>
     /// <exception cref="ObjectDisposedException">The buffer or executor has been disposed.</exception>
     public int Count
     {

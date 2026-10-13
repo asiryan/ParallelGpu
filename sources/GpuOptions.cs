@@ -10,7 +10,7 @@ public sealed record GpuOptions
     /// <remarks>In Auto mode, zero tries all GPUs in CUDA-first order; a larger index selects one GPU.</remarks>
     public int DeviceIndex { get; init; }
 
-    /// <summary>Gets or initializes whether Auto mode may use the CPU accelerator when no GPU can be initialized.</summary>
+    /// <summary>Gets or initializes whether Auto mode may use the CPU accelerator when no selected GPU can be initialized.</summary>
     /// <remarks>The default is false. Explicit CUDA and OpenCL requests never fall back to the CPU.</remarks>
     public bool AllowCpuFallback { get; init; }
 }

@@ -155,7 +155,7 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
     }
 
     /// <summary>Applies a validated device graph to host objects while preserving stable identities.</summary>
-    /// <returns>The current host roots; newly selected roots are returned rather than replacing the original input list.</returns>
+    /// <returns>The host roots from the downloaded snapshot; they are returned rather than replacing the original input list.</returns>
     /// <remarks>All new host instances are created before payload and reference writes. Existing instances
     /// are reused, including shared and cyclic references. Adapter-created objects must be distinct.
     /// Capacity and graph-access errors are checked before any adapter callback. Adapter exceptions
