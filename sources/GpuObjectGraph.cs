@@ -37,6 +37,8 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
     private readonly GpuBuffer<int> state;
     /// <summary>Whether this wrapper has been disposed.</summary>
     private bool disposed;
+    /// <summary>Whether adapter callbacks are applying a snapshot to this graph.</summary>
+    private bool copyToHostInProgress;
 
     /// <summary>Takes ownership of initialized graph allocations.</summary>
     /// <param name="owner">The executor.</param>
@@ -157,37 +159,50 @@ public sealed class GpuObjectGraph<TObject, TRecord> : IDisposable
     /// <remarks>All new host instances are created before payload and reference writes. Existing instances
     /// are reused, including shared and cyclic references. Adapter-created objects must be distinct.
     /// Capacity and graph-access errors are checked before any adapter callback. Adapter exceptions
-    /// may leave partially applied host changes.</remarks>
-    /// <exception cref="InvalidOperationException">The graph is invalid or the adapter returns null or duplicate instances.</exception>
+    /// may leave partially applied host changes. Adapter callbacks cannot recursively call
+    /// CopyToHost on this graph; read-only graph operations remain available.</remarks>
+    /// <exception cref="InvalidOperationException">The graph is invalid, the adapter returns null or duplicate
+    /// instances, or an adapter callback recursively calls CopyToHost on this graph.</exception>
     /// <exception cref="ObjectDisposedException">The graph or executor has been disposed.</exception>
     public TObject?[] CopyToHost()
     {
         lock (owner.SyncRoot)
         {
-            var snapshot = Download();
-            var instances = objects.ToList();
-            var seen = new HashSet<object>(instances, ReferenceIdentityComparer.Instance);
-            for (int i = instances.Count; i < snapshot.Data.Length; i++)
+            ThrowIfDisposed();
+            if (copyToHostInProgress)
+                throw new InvalidOperationException("Adapter callbacks cannot recursively call CopyToHost on the same graph.");
+            copyToHostInProgress = true;
+            try
             {
-                var created = adapter.CreateObject(snapshot.Data[i]);
-                if (created is null || !seen.Add(created))
-                    throw new InvalidOperationException("The graph adapter must create a distinct non-null object for each new record.");
-                instances.Add(created);
+                var snapshot = Download();
+                var instances = objects.ToList();
+                var seen = new HashSet<object>(instances, ReferenceIdentityComparer.Instance);
+                for (int i = instances.Count; i < snapshot.Data.Length; i++)
+                {
+                    var created = adapter.CreateObject(snapshot.Data[i]);
+                    if (created is null || !seen.Add(created))
+                        throw new InvalidOperationException("The graph adapter must create a distinct non-null object for each new record.");
+                    instances.Add(created);
+                }
+                // Retain each new instance before write callbacks so a retry preserves its identity.
+                for (int i = objects.Count; i < instances.Count; i++)
+                {
+                    identities.Add(instances[i], i);
+                    objects.Add(instances[i]);
+                }
+                for (int i = 0; i < instances.Count; i++)
+                    adapter.WriteValue(instances[i], snapshot.Data[i]);
+                for (int i = 0; i < instances.Count; i++)
+                {
+                    var linked = snapshot.Links[i].Select(handle => handle.IsNull ? null : instances[handle.Index]).ToArray();
+                    adapter.WriteReferences(instances[i], Array.AsReadOnly(linked));
+                }
+                return snapshot.Roots.Select(handle => handle.IsNull ? null : instances[handle.Index]).ToArray();
             }
-            // Retain each new instance before write callbacks so a retry preserves its identity.
-            for (int i = objects.Count; i < instances.Count; i++)
+            finally
             {
-                identities.Add(instances[i], i);
-                objects.Add(instances[i]);
+                copyToHostInProgress = false;
             }
-            for (int i = 0; i < instances.Count; i++)
-                adapter.WriteValue(instances[i], snapshot.Data[i]);
-            for (int i = 0; i < instances.Count; i++)
-            {
-                var linked = snapshot.Links[i].Select(handle => handle.IsNull ? null : instances[handle.Index]).ToArray();
-                adapter.WriteReferences(instances[i], Array.AsReadOnly(linked));
-            }
-            return snapshot.Roots.Select(handle => handle.IsNull ? null : instances[handle.Index]).ToArray();
         }
     }
 

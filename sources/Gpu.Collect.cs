@@ -78,6 +78,7 @@ public sealed partial class Gpu
             var key = (typeof(T), typeof(TKernel));
             if (!collectKernels.TryGetValue(key, out var compiled))
             {
+                DeviceValueType.ValidateStorage(typeof(T));
                 compiled = accelerator.LoadAutoGroupedStreamKernel<Index1D, int, GpuAppendView<T>, TKernel>(
                     ExecuteCollect<T, TKernel>);
                 collectKernels.Add(key, compiled);
