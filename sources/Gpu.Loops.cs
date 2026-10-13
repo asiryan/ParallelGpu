@@ -29,6 +29,7 @@ public sealed partial class Gpu
     /// <para>Collections include rectangular arrays of any CLR-supported rank, nested and mixed arrays,
     /// lists, memory slices, and registered adapters. Elements may be supported primitives, enums, nullable values,
     /// or structures without managed references. Aliases and array lower bounds are preserved.
+    /// Lists and contiguous views require value elements; access nested arrays directly.
     /// Constructors and compatible helpers accept values and collections. Captured descriptors and scalar values
     /// are read-only. Explicit layouts and native pointer fields are unsupported.</para>
     /// <para>Captures, including volatile fields, use host snapshots refreshed on every call.

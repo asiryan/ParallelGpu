@@ -60,6 +60,8 @@ Structures cannot contain managed references, native pointers, or explicit layou
 
 `For<T>` requires all automatically transferred collections to have ultimate element type `T`. Use `For(...)` for mixed element types. Device-compatible helpers may receive and return supported collections and references to elements.
 
+Lists, segments, memory, and spans require supported value elements. Access nested arrays directly through jagged-array descriptors.
+
 ```csharp
 int[,,] volume = new int[2, 3, 4];
 gpu.For<int>(0, volume.GetLength(0), x =>

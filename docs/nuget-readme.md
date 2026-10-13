@@ -61,7 +61,7 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 
 Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Scalar captures, including volatile fields, use host snapshots refreshed per call and are read-only; collection elements may be writable, but collection sizes and array topology cannot change during execution.
 
-Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Automatic structure mappings cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. Direct device buffers and explicit value kernels require public unmanaged ILGPU-compatible types.
+Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Automatic structure mappings cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. Lists, segments, memory, and spans require supported value elements; access nested arrays directly through jagged-array descriptors. Direct device buffers and explicit value kernels require public unmanaged ILGPU-compatible types.
 
 Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers and download results when needed. Transfers and kernel compilation can outweigh the benefit of GPU execution for small or inexpensive workloads.
 

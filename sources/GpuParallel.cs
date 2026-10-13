@@ -34,7 +34,7 @@ public static class GpuParallel
     {
         if (body is null)
             throw new ArgumentNullException(nameof(body));
-        if (toExclusive <= fromInclusive)
+        if (!ShouldRun(fromInclusive, toExclusive))
             return;
         Default.Value.For(fromInclusive, toExclusive, body);
     }
@@ -56,7 +56,7 @@ public static class GpuParallel
         if (body is null)
             throw new ArgumentNullException(nameof(body));
         LambdaKernel.ValidateElementType(typeof(T));
-        if (toExclusive <= fromInclusive)
+        if (!ShouldRun(fromInclusive, toExclusive))
             return;
         Default.Value.For<T>(fromInclusive, toExclusive, body);
     }
@@ -77,7 +77,7 @@ public static class GpuParallel
             throw new ArgumentNullException(nameof(options));
         if (body is null)
             throw new ArgumentNullException(nameof(body));
-        if (toExclusive <= fromInclusive)
+        if (!ShouldRun(fromInclusive, toExclusive))
             return;
         using var gpu = new Gpu(options);
         gpu.For(fromInclusive, toExclusive, body);
@@ -103,9 +103,23 @@ public static class GpuParallel
         if (body is null)
             throw new ArgumentNullException(nameof(body));
         LambdaKernel.ValidateElementType(typeof(T));
-        if (toExclusive <= fromInclusive)
+        if (!ShouldRun(fromInclusive, toExclusive))
             return;
         using var gpu = new Gpu(options);
         gpu.For<T>(fromInclusive, toExclusive, body);
+    }
+
+    /// <summary>Validates a loop range before initializing an executor.</summary>
+    /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
+    /// <param name="toExclusive">The exclusive upper bound of the range.</param>
+    /// <returns>True for a nonempty valid range, or false for an empty or reversed range.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations.</exception>
+    private static bool ShouldRun(int fromInclusive, int toExclusive)
+    {
+        long count = (long)toExclusive - fromInclusive;
+        if (count > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(toExclusive),
+                "One loop may contain at most Int32.MaxValue iterations.");
+        return count > 0;
     }
 }

@@ -30,6 +30,7 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         }
         if (element is null)
             return false;
+        LambdaKernel.ValidateElementType(element);
         if ((extension && method.GetParameters().Skip(1).Any(parameter => parameter.ParameterType != typeof(int))) ||
             (method.Name == "Slice" && method.GetParameters().Any(parameter => parameter.ParameterType != typeof(int))))
             throw new NotSupportedException("GPU memory slicing requires integer start and length arguments; Index and Range overloads are unsupported.");
@@ -44,6 +45,7 @@ internal sealed class AdapterMethodTranslator(TypeBuilder helpers)
         var type = constructor.DeclaringType!;
         if (!type.IsGenericType || !IsValueView(type))
             return false;
+        LambdaKernel.ValidateElementType(type.GetGenericArguments()[0]);
         if (constructor.GetParameters().Length == 0 ||
             constructor.GetParameters().Any(parameter => parameter.ParameterType != typeof(int) &&
                 CapturedCollection.ElementType(parameter.ParameterType) is null))
