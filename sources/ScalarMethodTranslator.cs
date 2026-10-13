@@ -21,6 +21,9 @@ internal sealed class ScalarMethodTranslator
     private readonly CollectionMethodTranslator collections;
     private readonly HashSet<MethodBase> validated = new();
 
+    /// <summary>Emits failure exits using the generated helper type shared with the loop body.</summary>
+    internal LoopFailureGuard FailureGuard { get; }
+
     /// <summary>Creates a helper type in the same module as the generated loop.</summary>
     /// <param name="module">The dynamic module owning the loop and its helpers.</param>
     internal ScalarMethodTranslator(ModuleBuilder module)
@@ -28,6 +31,7 @@ internal sealed class ScalarMethodTranslator
         generatedAssembly = (AssemblyBuilder)module.Assembly;
         helpers = module.DefineType("ScalarHelpers",
             TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+        FailureGuard = new(helpers);
         collections = new CollectionMethodTranslator(helpers);
     }
 
@@ -65,6 +69,8 @@ internal sealed class ScalarMethodTranslator
     {
         if (collections.TryEmit(il, method, receiverType))
             return;
+        if (method.DeclaringType is Type nativeType && DeviceNativeTypes.IsSupported(nativeType))
+            DeviceNativeTypes.Validate(nativeType);
         if ((!method.IsStatic && !IsCompatible(method.DeclaringType!)) ||
             !IsCompatible(method.ReturnType) || method.GetParameters().Any(p => !IsCompatible(p.ParameterType)))
             throw new NotSupportedException($"Method '{method.DeclaringType!.FullName}.{method.Name}' is not device-compatible.");
@@ -188,10 +194,10 @@ internal sealed class ScalarMethodTranslator
         if (!method.IsStatic)
             parameters = parameters.Prepend(MapType(method.DeclaringType!.MakeByRefType()));
         int contextArgument = parameters.Count();
-        parameters = parameters.Append(typeof(DeviceExecutionContext));
+        Type[] parameterTypes = parameters.Append(typeof(DeviceExecutionContext)).ToArray();
         var returnType = method is MethodInfo info ? MapType(info.ReturnType) : typeof(void);
         var replacement = helpers.DefineMethod("Value" + methods.Count,
-            MethodAttributes.Public | MethodAttributes.Static, returnType, parameters.ToArray());
+            MethodAttributes.Public | MethodAttributes.Static, returnType, parameterTypes);
         // Register before translating calls so recursive references resolve to the same generated method.
         methods.Add(method, replacement);
         var il = replacement.GetILGenerator();
@@ -214,11 +220,21 @@ internal sealed class ScalarMethodTranslator
         foreach (var instruction in instructions)
         {
             il.MarkLabel(labels[instruction.Offset]);
+            bool analyzed = stackTypes.TryGetValue(instruction.Offset, out var before);
+            if (analyzed && LoopFailureGuard.IsBackwardBranch(instruction))
+                FailureGuard.Emit(il, before!.Length, returnType, emitContext, parameterTypes);
+            void GuardAfter()
+            {
+                if (analyzed)
+                    FailureGuard.Emit(il, LoopFailureGuard.StackAfter(instruction, before!.Length),
+                        returnType, emitContext, parameterTypes);
+            }
             if (instruction.Code == OpCodes.Initobj && instruction.Operand is Type initialized &&
                 initialized.IsValueType && CapturedCollection.ElementType(initialized) is not null)
             {
                 emitContext(il);
                 il.Emit(OpCodes.Call, typeof(DeviceCollectionSlice).GetMethod(nameof(DeviceCollectionSlice.Initialize))!);
+                GuardAfter();
                 continue;
             }
             if (stackTypes.TryGetValue(instruction.Offset, out var stack) &&
@@ -226,13 +242,20 @@ internal sealed class ScalarMethodTranslator
                 continue;
             if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
                 TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
+            {
+                GuardAfter();
                 continue;
+            }
             if (LambdaKernel.TryArrayOperation(il, instruction))
+            {
+                GuardAfter();
                 continue;
+            }
             if (instruction.Operand is ConstructorInfo constructor &&
                 (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Newobj))
             {
                 EmitConstructor(il, instruction.Code, constructor, emitContext);
+                GuardAfter();
                 continue;
             }
             if (instruction.Operand is MethodInfo called &&
@@ -243,6 +266,7 @@ internal sealed class ScalarMethodTranslator
                     stackTypes.TryGetValue(instruction.Offset, out var receiverStack) &&
                     receiverStack.Length >= receiverOffset ? receiverStack[^receiverOffset] : null;
                 EmitCall(il, called, emitContext, receiverType);
+                GuardAfter();
                 continue;
             }
             if (DeviceInstructionValidation.IsReadOnlyScalarAddress(instruction))
@@ -457,7 +481,10 @@ internal sealed class ScalarMethodTranslator
     /// <returns>True when value mapping, arithmetic lowering, or translation of a transitive call is required.</returns>
     private static bool RequiresTranslation(MethodBase method, HashSet<MethodBase> visited)
     {
-        if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly || !visited.Add(method))
+        if (method.Module.Assembly == typeof(ILGPU.Atomic).Assembly ||
+            (method.Module.Assembly == typeof(DeviceNativeTypes).Assembly &&
+             method.DeclaringType is Type nativeType && DeviceNativeTypes.IsSupported(nativeType)) ||
+            !visited.Add(method))
             return false;
         if (DeviceNumericMethods.IsMath(method))
         {
@@ -479,6 +506,7 @@ internal sealed class ScalarMethodTranslator
             var instructions = LoopIL.Read(method);
             if (instructions.Any(instruction => instruction.Code == OpCodes.Sizeof ||
                 DeviceInstructionValidation.IsReadOnlyScalarAddress(instruction) ||
+                LoopFailureGuard.IsBackwardBranch(instruction) ||
                 DeviceArithmetic.IsNarrowingConversion(instruction.Code)))
                 return true;
             if (instructions.Any(instruction => DeviceArithmetic.IsDivision(instruction.Code)))

@@ -8,6 +8,8 @@ internal static class LoopStackTypes
 {
     /// <summary>Marks a join of collection references without a shared supported host type.</summary>
     private sealed class MergedCollectionReference;
+    /// <summary>Retains a common leaf type when unlike collection references meet at a control-flow join.</summary>
+    private sealed class MergedCollectionReference<T>;
 
     /// <summary>Propagates original evaluation-stack types across reachable instructions and control-flow joins.</summary>
     /// <param name="method">The method supplying argument and local types.</param>
@@ -28,6 +30,7 @@ internal static class LoopStackTypes
             int index = pending.Dequeue();
             var instruction = instructions[index];
             var stack = states[instruction.Offset].ToList();
+            ValidateCollectionConversion(method, instruction, stack);
             Apply(method, instruction, stack);
             var code = instruction.Code;
             if (code.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch)
@@ -72,11 +75,14 @@ internal static class LoopStackTypes
     {
         if (IsCollectionReference(left) && IsCollectionReference(right))
         {
+            var element = CollectionElement(left);
+            if (element is null || element != CollectionElement(right))
+                return typeof(MergedCollectionReference);
             if (left!.IsAssignableFrom(right))
                 return left;
             if (right!.IsAssignableFrom(left))
                 return right;
-            return typeof(MergedCollectionReference);
+            return typeof(MergedCollectionReference<>).MakeGenericType(element);
         }
         int width = DeviceArithmetic.IntegerWidth(left);
         return width > 0 && width == DeviceArithmetic.IntegerWidth(right)
@@ -84,8 +90,69 @@ internal static class LoopStackTypes
     }
 
     /// <summary>Recognizes source collection references and their merged analysis category.</summary>
-    private static bool IsCollectionReference(Type? type) => type == typeof(MergedCollectionReference) ||
+    private static bool IsCollectionReference(Type? type) => IsMergedCollectionReference(type) ||
         type is not null && !type.IsValueType && CapturedCollection.ElementType(type) is not null;
+
+    /// <summary>Recognizes analysis markers carrying merged collection references.</summary>
+    private static bool IsMergedCollectionReference(Type? type) => type == typeof(MergedCollectionReference) ||
+        type is { IsGenericType: true } && type.GetGenericTypeDefinition() == typeof(MergedCollectionReference<>);
+
+    /// <summary>Gets a descriptor's original leaf type, retaining compatible types across control-flow joins.</summary>
+    private static Type? CollectionElement(Type? type)
+    {
+        if (type?.IsByRef == true)
+            type = type.GetElementType();
+        return type is { IsGenericType: true } && type.GetGenericTypeDefinition() == typeof(MergedCollectionReference<>)
+            ? type.GetGenericArguments()[0] : type is null ? null : CapturedCollection.ElementType(type);
+    }
+
+    /// <summary>Rejects implicit reference conversions that would reinterpret a mapped collection's element storage.</summary>
+    private static void ValidateCollectionConversion(MethodBase method, LoopInstruction instruction, List<Type?> stack)
+    {
+        void Check(Type? source, Type? destination)
+        {
+            if (source?.IsByRef == true)
+                source = source.GetElementType();
+            if (destination?.IsByRef == true)
+                destination = destination.GetElementType();
+            var element = CollectionElement(destination);
+            if (source != typeof(void) && IsCollectionReference(source) && element is not null &&
+                CollectionElement(source) != element)
+                throw new NotSupportedException("An implicit collection conversion changes the GPU element type. " +
+                    "Capture the collection through the required native declaration separately.");
+        }
+
+        var code = instruction.Code;
+        if (instruction.Operand is MethodBase called &&
+            (code == OpCodes.Call || code == OpCodes.Callvirt || code == OpCodes.Newobj))
+        {
+            var parameters = called.GetParameters();
+            for (int i = 0; i < parameters.Length; i++)
+                Check(stack[stack.Count - parameters.Length + i], parameters[i].ParameterType);
+            // Direct registered receivers can intentionally adapt inherited members. At a
+            // merged receiver there is no such declaration to select an adapter safely.
+            if (code != OpCodes.Newobj && !called.IsStatic &&
+                IsMergedCollectionReference(stack[stack.Count - parameters.Length - 1]))
+                Check(stack[stack.Count - parameters.Length - 1], called.DeclaringType);
+        }
+        else if (code.Name!.StartsWith("stloc", StringComparison.Ordinal))
+        {
+            int local = code == OpCodes.Stloc_0 ? 0 : code == OpCodes.Stloc_1 ? 1 :
+                code == OpCodes.Stloc_2 ? 2 : code == OpCodes.Stloc_3 ? 3 : (int)instruction.Operand!;
+            Check(stack[^1], method.GetMethodBody()!.LocalVariables[local].LocalType);
+        }
+        else if (code == OpCodes.Starg || code == OpCodes.Starg_S)
+        {
+            int parameter = (int)instruction.Operand! - (method.IsStatic ? 0 : 1);
+            Check(stack[^1], parameter < 0 ? method.DeclaringType : method.GetParameters()[parameter].ParameterType);
+        }
+        else if (code == OpCodes.Ret && method is MethodInfo { ReturnType: var returnType } && returnType != typeof(void))
+            Check(stack[^1], returnType);
+        else if (code == OpCodes.Stind_Ref || code == OpCodes.Stobj)
+            Check(stack[^1], code == OpCodes.Stobj ? (Type)instruction.Operand! : stack[^2]?.GetElementType());
+        else if (instruction.Operand is FieldInfo field && (code == OpCodes.Stfld || code == OpCodes.Stsfld))
+            Check(stack[^1], field.FieldType);
+    }
 
     /// <summary>Rewrites null values, null tests, and reference comparisons for translated collection descriptors.</summary>
     /// <returns>True if a replacement was emitted; otherwise false.</returns>
@@ -190,8 +257,8 @@ internal static class LoopStackTypes
             type = typeof(void);
         else if (code == OpCodes.Ldlen)
             type = typeof(int);
-        else if (code == OpCodes.Ldelem_Ref && before[^2] == typeof(MergedCollectionReference))
-            type = typeof(MergedCollectionReference);
+        else if (code == OpCodes.Ldelem_Ref && IsMergedCollectionReference(before[^2]))
+            type = before[^2];
         else if (code.Name.StartsWith("ldelem.", StringComparison.Ordinal))
             type = before[^2]?.GetElementType() ?? typeof(object);
         else if (code.Name.StartsWith("ldind.", StringComparison.Ordinal))

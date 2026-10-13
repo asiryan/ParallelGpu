@@ -195,6 +195,9 @@ internal sealed class LambdaKernel
         {
             var instruction = instructions[i];
             il.MarkLabel(labels[instruction.Offset]);
+            if (LoopFailureGuard.IsBackwardBranch(instruction) &&
+                stackTypes.TryGetValue(instruction.Offset, out var branchStack))
+                scalarMethods.FailureGuard.Emit(il, branchStack.Length, typeof(void), emitContext);
             var argument = LoopIL.Argument(instruction);
             if ((!source.IsStatic && argument == 0) ||
                 instruction.Code == OpCodes.Ldsfld || instruction.Code == OpCodes.Ldsflda)
@@ -266,9 +269,15 @@ internal sealed class LambdaKernel
                 continue;
             if (stackTypes.TryGetValue(instruction.Offset, out var arithmeticStack) &&
                 ScalarMethodTranslator.TryEmitArithmetic(il, instruction, arithmeticStack, emitContext))
+            {
+                EmitFailureGuard(instruction);
                 continue;
+            }
             if (TryArrayOperation(il, instruction))
+            {
+                EmitFailureGuard(instruction);
                 continue;
+            }
             if (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt)
             {
                 if (instruction.Operand is ConstructorInfo constructor)
@@ -280,11 +289,13 @@ internal sealed class LambdaKernel
                         ? callStack[callStack.Length - called.GetParameters().Length - 1] : null;
                     scalarMethods.EmitCall(il, called, emitContext, receiver);
                 }
+                EmitFailureGuard(instruction);
                 continue;
             }
             if (instruction.Code == OpCodes.Newobj)
             {
                 scalarMethods.EmitConstructor(il, instruction.Code, (ConstructorInfo)instruction.Operand!, emitContext);
+                EmitFailureGuard(instruction);
                 continue;
             }
             if (instruction.Code == OpCodes.Ldfld || instruction.Code == OpCodes.Ldflda ||
@@ -302,6 +313,13 @@ internal sealed class LambdaKernel
 
             LoopIL.Emit(il, instruction.Operand is Type operandType
                 ? instruction with { Operand = ScalarMethodTranslator.MapType(operandType) } : instruction, labels);
+        }
+
+        void EmitFailureGuard(LoopInstruction instruction)
+        {
+            if (stackTypes.TryGetValue(instruction.Offset, out var stack))
+                scalarMethods.FailureGuard.Emit(il, LoopFailureGuard.StackAfter(instruction, stack.Length),
+                    typeof(void), emitContext);
         }
 
         // The ILGPU entry point converts a zero-based device index into the original loop index.
@@ -446,12 +464,18 @@ internal sealed class LambdaKernel
     /// <returns>The required scratch element size in bytes, or zero when no supported element references are found.</returns>
     private static int ScratchElementSize(MethodBase method, HashSet<MethodBase> visited)
     {
-        if (!visited.Add(method) || method.GetMethodBody() is null || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
+        if (!visited.Add(method) || method.GetMethodBody() is null || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly ||
+            method.DeclaringType is { } declaring && DeviceNativeTypes.IsSupported(declaring) &&
+            method.Module.Assembly == typeof(DeviceNativeTypes).Assembly)
             return 0;
         List<LoopInstruction> instructions;
         try { instructions = LoopIL.Read(method); }
         catch (NotSupportedException) { return 0; }
         int size = 0;
+        // A helper interrupted at a loop backedge may need to return a temporary ref value.
+        if (method is MethodInfo returning && returning.ReturnType.IsByRef &&
+            DeviceValueType.IsSupported(returning.ReturnType.GetElementType()!))
+            size = Interop.SizeOf(DeviceValueType.MapType(returning.ReturnType.GetElementType()!));
         foreach (var instruction in instructions)
         {
             Type? element = instruction.Code == OpCodes.Ldelema ? (Type)instruction.Operand! : null;

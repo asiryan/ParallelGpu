@@ -52,7 +52,7 @@ Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.
 - Backend-independent `GpuView<T>` from `buffer.DeviceView` to use the same lambda API with data retained on the device.
 - Explicit value kernels through `IGpuForKernel` and `IGpuForEachKernel<T>`.
 - Reductions, atomic operations, and bounded append buffers for variable output.
-- Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. Explicit object-graph adapters support custom data models.
+- Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. When a snapshot identifies its original list as storage, native list helper parameters and return values expose the full list; the registered custom declaration keeps the snapshot slice. Implicit reference conversions between collection declarations with different element types are unsupported; capture the required native declaration separately. Explicit object-graph adapters support custom data models.
 - Floating-point `%` and .NET 8 `Math`/`MathF` overloads for the supported numeric types, including trigonometry, hyperbolic functions, logarithms, rounding modes, fused multiply-add, IEEE helpers, `BigMul`, and both `DivRem` forms. Overloads using `decimal`, `nint`, or `nuint` are excluded.
 
 ## Execution requirements and limitations
@@ -67,7 +67,7 @@ Automatic loops transfer captured collections on every call. For repeated operat
 
 `GpuView<T>` borrows device memory. Lambda captures validate its owner and lifetime before execution; indices must be in range in both lambdas and explicit kernels. Device buffer writes are not rolled back on later errors.
 
-Bounds, null access, read-only writes and guarded arithmetic errors become host exceptions before automatic collection copyback, including `ref` access in value constructors. `ArraySegment<T>` constructor validation follows CLR behavior. Large loops may use several launches with shared device storage; copyback requires every launch to succeed. Owned device buffers and callback side effects are not rolled back.
+Bounds, null access, read-only writes and guarded arithmetic errors become host exceptions before automatic collection copyback, including `ref` access in value constructors. Translated ordinary bodies and helpers stop after a deferred failure so fallback values cannot keep their loops running. `ArraySegment<T>` constructor validation follows CLR behavior. Large loops may use several launches with shared device storage; copyback requires every launch to succeed. Owned device buffers and callback side effects are not rolled back.
 
 Calls on one `Gpu` instance are serialized. Avoid modifying transferred host collections concurrently, and dispose the executor and its buffers when finished. Transcendental functions are approximate; compare with a numerical tolerance. Floating-point reduction results may differ from sequential CPU results and between devices.
 

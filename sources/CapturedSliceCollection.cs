@@ -12,15 +12,18 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
     private readonly bool nullBackedSegment;
     /// <summary>Retains the CLR argument-range error contract of segment indexers.</summary>
     private readonly bool arraySegment;
+    /// <summary>Retains the complete native representation of a list captured through its adapter.</summary>
+    private readonly bool nativeList;
 
     internal CapturedSliceCollection(CollectionTransfers transfers, CapturedCollection<T> backing, GpuCollectionSnapshot<T> snapshot,
-        bool arraySegment = false, bool nullBackedSegment = false)
+        bool arraySegment = false, bool nullBackedSegment = false, bool nativeList = false)
     {
         this.transfers = transfers;
         this.backing = backing;
         this.snapshot = snapshot;
         this.arraySegment = arraySegment;
         this.nullBackedSegment = nullBackedSegment;
+        this.nativeList = nativeList;
         shapeOffset = transfers.AddFlatShape(snapshot.Count);
     }
 
@@ -38,7 +41,9 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
                 snapshot.Count, elementSize: nullBackedSegment ? 0 : view.ElementSize, writes: view.Writes, dirtyIndex: view.DirtyIndex,
                 shapeMetadata: transfers.Shapes, shapeOffset: shapeOffset, rank: 1, identity: Identity,
                 context: view.Context, readOnly: snapshot.IsReadOnly ? 1 : 0,
-                indexErrorCode: arraySegment ? 9 : view.IndexErrorCode);
+                indexErrorCode: arraySegment ? 9 : view.IndexErrorCode,
+                nativeListBytes: nativeList ? view.Bytes : default,
+                nativeListLength: nativeList ? view.Length : 0, nativeListStorage: nativeList ? 1 : 0);
         }
     }
 }

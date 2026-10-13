@@ -46,12 +46,12 @@ internal sealed class CollectionMethodTranslator(TypeBuilder helpers)
             {
                 string name = method.Name switch
                 {
-                    "get_Item" => nameof(DeviceCollectionSlice.ReadIndexed),
-                    "set_Item" => nameof(DeviceCollectionSlice.WriteIndexed),
-                    "get_Count" => nameof(DeviceCollection.Count),
+                    "get_Item" => nameof(DeviceCollection.NativeListRead),
+                    "set_Item" => nameof(DeviceCollection.NativeListWrite),
+                    "get_Count" => nameof(DeviceCollection.NativeListCount),
                     _ => throw new NotSupportedException($"Collection operation '{method.Name}' requires an explicit GPU operation.")
                 };
-                var replacement = (name == nameof(DeviceCollection.Count) ? typeof(DeviceCollection) : typeof(DeviceCollectionSlice)).GetMethod(name)!;
+                var replacement = typeof(DeviceCollection).GetMethod(name)!;
                 if (replacement.IsGenericMethodDefinition)
                     replacement = replacement.MakeGenericMethod(DeviceValueType.MapType(type.GetGenericArguments()[0]));
                 il.Emit(OpCodes.Call, replacement);

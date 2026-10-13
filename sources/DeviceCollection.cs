@@ -39,6 +39,12 @@ internal readonly struct DeviceCollection
     public readonly ArrayView<int> Writes;
     /// <summary>The leaf's shared write-flag index, or minus one for a container.</summary>
     public readonly int DirtyIndex;
+    /// <summary>The complete native list storage retained by an adapted list slice.</summary>
+    public readonly ArrayView<byte> NativeListBytes;
+    /// <summary>The complete native list length, used only when NativeListStorage is nonzero.</summary>
+    public readonly int NativeListLength;
+    /// <summary>One when this descriptor also represents its original native list storage.</summary>
+    public readonly int NativeListStorage;
 
     /// <summary>Creates a leaf or nested-array view.</summary>
     /// <param name="bytes">The leaf slice or the complete packed device buffer.</param>
@@ -57,12 +63,16 @@ internal readonly struct DeviceCollection
     /// <param name="context">The invocation's deferred error context.</param>
     /// <param name="readOnly">One for a read-only view, otherwise zero.</param>
     /// <param name="indexErrorCode">Three for array/span bounds, or nine for list/segment indexers.</param>
+    /// <param name="nativeListBytes">The complete native list storage for an adapted list slice.</param>
+    /// <param name="nativeListLength">The complete native list element count.</param>
+    /// <param name="nativeListStorage">One when a native list projection is available, otherwise zero.</param>
     public DeviceCollection(ArrayView<byte> bytes, int length, int rows = -1, int columns = 0,
         ArrayView<int> rowMetadata = default, int elementSize = 0,
         ArrayView<int> writes = default, int dirtyIndex = -1,
         ArrayView<int> shapeMetadata = default, int shapeOffset = -1,
         int rank = 1, int rowOffset = 0, int identity = 0, DeviceExecutionContext context = default, int readOnly = 0,
-        int indexErrorCode = 3)
+        int indexErrorCode = 3, ArrayView<byte> nativeListBytes = default, int nativeListLength = 0,
+        int nativeListStorage = 0)
     {
         Bytes = bytes;
         Length = length;
@@ -80,6 +90,9 @@ internal readonly struct DeviceCollection
         ElementSize = elementSize;
         Writes = writes;
         DirtyIndex = dirtyIndex;
+        NativeListBytes = nativeListBytes;
+        NativeListLength = nativeListLength;
+        NativeListStorage = nativeListStorage;
     }
 
     /// <summary>Reads one flat leaf element without marking it as written.</summary>
@@ -189,7 +202,37 @@ internal readonly struct DeviceCollection
         new(collection.Bytes, collection.Length, collection.Rows, collection.Columns,
             collection.RowMetadata, collection.ElementSize, collection.Writes, collection.DirtyIndex,
             collection.ShapeMetadata, collection.ShapeOffset, collection.Rank, collection.RowOffset,
-            collection.Identity, context, collection.IsReadOnly, collection.IndexErrorCode);
+            collection.Identity, context, collection.IsReadOnly, collection.IndexErrorCode,
+            collection.NativeListBytes, collection.NativeListLength, collection.NativeListStorage);
+
+    /// <summary>Restores native list storage when an adapted list is used through a native declaration.</summary>
+    /// <param name="collection">The native collection or adapted list slice.</param>
+    /// <returns>The complete writable native list view, or the original descriptor for other collections.</returns>
+    private static DeviceCollection NativeList(DeviceCollection collection) => collection.NativeListStorage == 0
+        ? collection : new(collection.NativeListBytes, collection.NativeListLength,
+            elementSize: collection.ElementSize, writes: collection.Writes, dirtyIndex: collection.DirtyIndex,
+            identity: collection.Identity, context: collection.Context, indexErrorCode: 9);
+
+    /// <summary>Returns the count selected by a native List, IList, or IReadOnlyList declaration.</summary>
+    /// <param name="collection">The native collection or adapted list slice.</param>
+    /// <returns>The complete native count, retaining normal null-reference validation.</returns>
+    public static int NativeListCount(DeviceCollection collection) => Count(NativeList(collection));
+
+    /// <summary>Reads a native list-interface element, including through an implicitly upcast adapted list.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The native collection or adapted list slice.</param>
+    /// <param name="index">The native zero-based index.</param>
+    /// <returns>The element, or the default value after recording a deferred access error.</returns>
+    public static T NativeListRead<T>(DeviceCollection collection, int index) where T : unmanaged =>
+        DeviceCollectionSlice.ReadIndexed<T>(NativeList(collection), index);
+
+    /// <summary>Writes a native list-interface element, including through an implicitly upcast adapted list.</summary>
+    /// <typeparam name="T">The device element type.</typeparam>
+    /// <param name="collection">The native collection or adapted list slice.</param>
+    /// <param name="index">The native zero-based index.</param>
+    /// <param name="value">The value to store in the complete native list.</param>
+    public static void NativeListWrite<T>(DeviceCollection collection, int index, T value) where T : unmanaged =>
+        DeviceCollectionSlice.WriteIndexed(NativeList(collection), index, value);
 
     /// <summary>Atomically marks a leaf for copy-back.</summary>
     /// <param name="collection">The leaf view.</param>

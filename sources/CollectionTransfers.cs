@@ -109,7 +109,8 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             }
             collection = new CapturedSliceCollection<T>(this, backing, snapshot,
                 arraySegment: source is ArraySegment<T>,
-                nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null);
+                nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null,
+                nativeList: source is List<T> && ReferenceEquals(snapshot.Identity, source));
             if (snapshot.Commit is not null && !adapterCommits.ContainsKey(snapshot.Identity))
                 adapterCommits.Add(snapshot.Identity, (backing.DirtyIndex, () => snapshot.Commit(snapshot.Buffer)));
         }

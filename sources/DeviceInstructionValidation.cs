@@ -50,6 +50,10 @@ internal static class DeviceInstructionValidation
     {
         if (!visited.Add(method) || method.Module.Assembly == typeof(ILGPU.Atomic).Assembly)
             return;
+        if (method is ConstructorInfo constructor &&
+            (!constructor.DeclaringType!.IsValueType || !ScalarMethodTranslator.IsCompatible(constructor.DeclaringType) ||
+             constructor.GetParameters().Any(parameter => !ScalarMethodTranslator.IsCompatible(parameter.ParameterType))))
+            throw new NotSupportedException($"Constructor '{constructor}' is not a device-compatible value constructor. Managed allocation is unsupported inside GPU helpers.");
         if (method is MethodInfo info && (!ScalarMethodTranslator.IsCompatible(info.ReturnType) ||
             info.GetParameters().Any(parameter => !ScalarMethodTranslator.IsCompatible(parameter.ParameterType))))
             throw new NotSupportedException($"Helper '{method}' uses managed parameters or a managed return value.");
