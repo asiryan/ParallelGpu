@@ -1,8 +1,8 @@
 <p align="center"><img width="45%" src="docs/logo_big.png" /></p>
 
-# ParallelGpu
-
 Synchronous C# loops on [CUDA](https://developer.nvidia.com/cuda) or [OpenCL](https://www.khronos.org/opencl/), powered by [ILGPU](https://ilgpu.net). Write a lambda over captured collections; the library compiles it, transfers the data, and copies results back before returning.
+
+# ParallelGpu
 
 The library targets .NET Standard 2.1. Install from [NuGet](https://www.nuget.org/packages/ParallelGpu/) or build from source; ILGPU dependencies are restored automatically.
 
@@ -78,7 +78,7 @@ Native buffers use unmanaged ILGPU-compatible types, without automatic value map
 
 Transfers and compilation can outweigh GPU execution for small workloads. Measure complete calls after warm-up in Release mode.
 
-## Examples
+# Examples
 
 The [samples](samples) cover [matrix multiplication](samples/FloatMatrixMultiplication), [FFT](samples/FastFourierTransform), [hash search](samples/PasswordHashSearch), [Monte Carlo](samples/MonteCarloPi), [factorization](samples/SemiPrimeFactorization), [digit recognition](samples/DigitRecognizer), [Mandelbrot](samples/Mandelbrot), [ray tracing](samples/RayTracer), and [image denoising](samples/ImageDenoising).
 
@@ -90,7 +90,7 @@ dotnet run --project samples/FloatMatrixMultiplication -c Release
 
 Digit recognition requires `.artifacts/digit-recognizer.zip`; dataset and training settings are in its [Program.cs](samples/DigitRecognizer/Program.cs). Image denoising includes an [input image](samples/ImageDenoising/Assets/README.md).
 
-## Build and test
+# Build and test
 
 ```powershell
 dotnet build ParallelGpu.sln -c Release -warnaserror
@@ -102,6 +102,6 @@ dotnet test tests/ParallelGpu.Tests.csproj -c Release --no-build
 
 Tests default to `Cpu`; the environment variable also accepts `Cuda`, `OpenCL`, and `Auto` (`Auto` requires a GPU). `build.bat` builds just the library and NuGet package. Release packages in `sources/bin/Release/` include the license, package README, logo, and XML API documentation.
 
-## License
+# License
 
 [MIT](LICENSE)
