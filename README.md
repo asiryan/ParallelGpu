@@ -18,6 +18,8 @@ dotnet add package ParallelGpu
 
 The library targets .NET Standard 2.1. Install from [NuGet](https://www.nuget.org/packages/ParallelGpu/) or build from source; ILGPU dependencies are restored automatically.
 
+Quick start C# code:
+
 ```csharp
 using ParallelGpu;
 
