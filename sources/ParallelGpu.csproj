@@ -35,6 +35,6 @@
   <ItemGroup>
     <None Include="../docs/nuget-readme.md" Pack="true" PackagePath="README.md" />
     <None Include="../LICENSE" Pack="true" PackagePath="" />
-    <None Include="../docs/logo.png" Pack="true" PackagePath="logo.png" />
+    <None Include="../docs/png/logo.png" Pack="true" PackagePath="logo.png" />
   </ItemGroup>
 </Project>

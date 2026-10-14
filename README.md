@@ -1,4 +1,4 @@
-<p align="center"><img width="45%" src="docs/logo_big.png" /></p>
+<p align="center"><img width="45%" src="docs/png/logo_big.png" /></p>
 
 Synchronous C# loops on [CUDA](https://developer.nvidia.com/cuda) or [OpenCL](https://www.khronos.org/opencl/), powered by [ILGPU](https://ilgpu.net). Write a lambda over captured collections; the library compiles it, transfers the data, and copies results back before returning.
 

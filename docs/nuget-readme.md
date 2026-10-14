@@ -49,7 +49,7 @@ The automatic lambda API requires runtime code generation (`Reflection.Emit`) an
 
 Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Captured scalars are read-only snapshots. Collection elements may be writable, but sizes and references between arrays cannot change during a loop.
 
-Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Value structures must satisfy the [supported type rules](https://github.com/asiryan/ParallelGpu/blob/dev/docs/guide.md); device buffers and explicit kernels have stricter ILGPU type requirements.
+Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Value structures must satisfy the [supported type rules](https://github.com/asiryan/ParallelGpu/blob/main/docs/guide.md); device buffers and explicit kernels have stricter ILGPU type requirements.
 
 Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers. Transfers and compilation can outweigh GPU gains for small workloads.
 
@@ -59,7 +59,7 @@ Calls on one `Gpu` instance are serialized. Avoid concurrent host changes to tra
 
 ## Documentation and examples
 
-See the [API guide](https://github.com/asiryan/ParallelGpu/blob/dev/docs/guide.md), [supported math operations](https://github.com/asiryan/ParallelGpu/blob/dev/docs/math.md), and [sample applications](https://github.com/asiryan/ParallelGpu/tree/dev/samples).
+See the [API guide](https://github.com/asiryan/ParallelGpu/blob/main/docs/guide.md), [supported math operations](https://github.com/asiryan/ParallelGpu/blob/main/docs/math.md), and [sample applications](https://github.com/asiryan/ParallelGpu/tree/main/samples).
 
 ## License
 
