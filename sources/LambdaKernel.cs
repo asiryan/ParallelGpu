@@ -92,6 +92,8 @@ internal sealed class LambdaKernel
                 !GpuCollectionAdapters.SupportsRuntime(values[i]!.GetType()))
                 throw new NotSupportedException(
                     "Captured IList<T>/IReadOnlyList<T> must refer to an array or List<T>.");
+            if (capture.Element is not null && values[i] is not null)
+                GpuCollectionAdapters.ValidateRuntime(values[i]!, capture.Path[^1].FieldType, capture.Element);
         }
         var state = Activator.CreateInstance(stateType)!;
         using var transfers = new CollectionTransfers(gpu);

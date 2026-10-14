@@ -116,7 +116,7 @@ internal static class LoopStackTypes
     private static void ValidateIndexerConversion(Type source, Type destination, Type element)
     {
         if (GpuCollectionAdapters.ChangesIndexer(source, destination, element))
-            throw new NotSupportedException("An implicit collection conversion changes the registered GPU indexer. " +
+            throw new NotSupportedException("An implicit collection conversion changes the registered GPU indexer or Count. " +
                 "Capture the collection through the required declaration separately.");
     }
 
@@ -149,12 +149,12 @@ internal static class LoopStackTypes
             {
                 var receiver = stack[stack.Count - parameters.Length - 1];
                 // Inherited accessors can use the receiver's registered adapter. A hidden
-                // base indexer needs its own capture, even if an optimizer omitted the upcast local.
+                // indexer or Count needs its own capture, even if an optimizer omitted the upcast local.
                 if (IsMergedCollectionReference(receiver))
                     Check(receiver, called.DeclaringType);
                 else if (receiver is not null && CollectionElement(receiver) is Type element &&
                     called is MethodInfo member && called.DeclaringType is Type declaring &&
-                    GpuCollectionAdapters.AccessorOperation(declaring, member, element) is "get_Item" or "set_Item")
+                    GpuCollectionAdapters.AccessorOperation(declaring, member, element) is not null)
                     ValidateIndexerConversion(receiver, declaring, element);
             }
         }

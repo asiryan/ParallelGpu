@@ -154,7 +154,7 @@ internal static partial class DeviceExtendedMath
         remainder = 0;
         if (right == 0) { context.Fail(11); return 0; }
         if (left == int.MinValue && right == -1) { context.Fail(12); return 0; }
-        int quotient = left / right;
+        int quotient = DeviceArithmetic.DivideInt32(left, right, context);
         remainder = left - quotient * right;
         return quotient;
     }
@@ -164,7 +164,7 @@ internal static partial class DeviceExtendedMath
         remainder = 0;
         if (right == 0) { context.Fail(11); return 0; }
         if (left == long.MinValue && right == -1) { context.Fail(12); return 0; }
-        long quotient = left / right;
+        long quotient = DeviceArithmetic.DivideInt64(left, right, context);
         remainder = left - quotient * right;
         return quotient;
     }
@@ -184,14 +184,14 @@ internal static partial class DeviceExtendedMath
     public static (uint Quotient, uint Remainder) DivRemUInt32(uint left, uint right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return default; }
-        uint quotient = left / right;
+        uint quotient = DeviceArithmetic.DivideUInt32(left, right, context);
         return (quotient, left - quotient * right);
     }
 
     public static (ulong Quotient, ulong Remainder) DivRemUInt64(ulong left, ulong right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return default; }
-        ulong quotient = left / right;
+        ulong quotient = DeviceArithmetic.DivideUInt64(left, right, context);
         return (quotient, left - quotient * right);
     }
 
@@ -199,28 +199,28 @@ internal static partial class DeviceExtendedMath
     {
         if (right == 0) { context.Fail(11); return default; }
         // The framework performs promoted division then an unchecked narrow conversion.
-        sbyte quotient = unchecked((sbyte)(left / right));
+        sbyte quotient = unchecked((sbyte)DeviceArithmetic.DivideInt32(left, right, context));
         return (quotient, unchecked((sbyte)(left - quotient * right)));
     }
 
     public static (byte Quotient, byte Remainder) DivRemUInt8(byte left, byte right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return default; }
-        byte quotient = (byte)(left / right);
+        byte quotient = (byte)DeviceArithmetic.DivideUInt32(left, right, context);
         return (quotient, (byte)(left - quotient * right));
     }
 
     public static (short Quotient, short Remainder) DivRemInt16(short left, short right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return default; }
-        short quotient = unchecked((short)(left / right));
+        short quotient = unchecked((short)DeviceArithmetic.DivideInt32(left, right, context));
         return (quotient, unchecked((short)(left - quotient * right)));
     }
 
     public static (ushort Quotient, ushort Remainder) DivRemUInt16(ushort left, ushort right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return default; }
-        ushort quotient = (ushort)(left / right);
+        ushort quotient = (ushort)DeviceArithmetic.DivideUInt32(left, right, context);
         return (quotient, (ushort)(left - quotient * right));
     }
 }

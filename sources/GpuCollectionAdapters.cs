@@ -14,8 +14,10 @@ namespace ParallelGpu;
 /// capture declaration selects its own adapter before runtime adapter resolution.</remarks>
 public static class GpuCollectionAdapters
 {
-    private sealed record Adapter(Type Element, Func<object, object> Capture);
+    private sealed record Adapter(Type Declaration, Type Element, Func<object, object> Capture);
     private static readonly ConcurrentDictionary<Type, Adapter> adapters = new();
+    private static readonly ConcurrentDictionary<(Type Runtime, Type Source, Type Destination, Type Element), bool>
+        accessorCompatibility = new();
     private static readonly object registrationSync = new();
     private static readonly HashSet<Type> frozen = new();
 
@@ -46,7 +48,7 @@ public static class GpuCollectionAdapters
         {
             if (frozen.Contains(type))
                 throw new InvalidOperationException($"Collection type '{type}' has already been inspected for GPU compilation. Register its adapter before compiling any loop using that type.");
-            if (!adapters.TryAdd(type, new(typeof(T), value => capture((TCollection)value))))
+            if (!adapters.TryAdd(type, new(type, typeof(T), value => capture((TCollection)value))))
                 throw new InvalidOperationException($"A GPU collection adapter for '{type}' is already registered.");
         }
     }
@@ -104,33 +106,100 @@ public static class GpuCollectionAdapters
             candidate.DeclaringType == method.DeclaringType;
     }
 
-    /// <summary>Detects adapter upcasts that would keep storage for a different, hidden indexer.</summary>
+    /// <summary>Detects adapter upcasts that would retain a different indexer or Count/Length accessor.</summary>
     internal static bool ChangesIndexer(Type source, Type destination, Type element)
     {
-        if (source == destination || !adapters.ContainsKey(source) || !adapters.ContainsKey(destination))
+        if (source == destination || !adapters.ContainsKey(source))
             return false;
-        MethodInfo? Indexer(Type type)
+        if (CapturedCollection.IsNativeCollection(destination) || destination.IsGenericType &&
+            (destination.GetGenericTypeDefinition() == typeof(ICollection<>) ||
+                destination.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>)))
         {
-            var properties = Properties(type).Where(property => property.PropertyType == element &&
-                property.GetIndexParameters() is [{ ParameterType: var index }] && index == typeof(int) &&
-                property.GetMethod is not null).ToArray();
-            return properties.FirstOrDefault(property => !properties.Any(other =>
+            // Adapted List subclasses can retain both their snapshot and their complete native list.
+            // Other adapters may only use an interface that resolves to their own accessors.
+            if (typeof(List<>).MakeGenericType(element).IsAssignableFrom(source))
+                return false;
+            return !CompatibleAccessors(source, source, destination, element);
+        }
+        if (!adapters.ContainsKey(destination))
+            return false;
+        return !CompatibleAccessors(source, source, destination, element);
+    }
+
+    /// <summary>Rejects runtime interface dispatch that cannot preserve native or adapted storage.</summary>
+    internal static void ValidateRuntime(object source, Type declaredType, Type element)
+    {
+        var runtime = source.GetType();
+        if (source is Array || BuiltinElement(runtime) is not null)
+            return;
+        var nativeList = typeof(List<>).MakeGenericType(element);
+        if (runtime == nativeList)
+            return;
+        if (nativeList.IsAssignableFrom(runtime))
+        {
+            // A List declaration can flow to interface helpers, so validate all supported native
+            // interfaces before any capture callbacks, even when the original capture is List<T>.
+            foreach (var contract in new[] { typeof(IList<>), typeof(IReadOnlyList<>),
+                typeof(ICollection<>), typeof(IReadOnlyCollection<>) })
+            {
+                var declaration = contract.MakeGenericType(element);
+                if (!CompatibleAccessors(runtime, nativeList, declaration, element))
+                    throw new NotSupportedException($"Runtime list '{runtime}' reimplements a native collection indexer or Count. " +
+                        "GPU loops cannot preserve this interface dispatch; use a plain List<T> or a separately adapted collection.");
+            }
+        }
+        if (adapters.ContainsKey(declaredType) || nativeList.IsAssignableFrom(runtime))
+            return;
+        var adapter = FindAdapter(runtime, element);
+        if (adapter is not null && !CompatibleAccessors(runtime, adapter.Declaration, declaredType, element))
+            throw new NotSupportedException($"Runtime GPU adapter '{adapter.Declaration}' does not preserve the indexer or Count of '{declaredType}'. " +
+                "Capture the collection through its registered declaration separately.");
+    }
+
+    /// <summary>Compares supported accessor targets after resolving the runtime interface implementation.</summary>
+    private static bool CompatibleAccessors(Type runtime, Type source, Type destination, Type element)
+        => accessorCompatibility.GetOrAdd((runtime, source, destination, element), key =>
+            CompareAccessors(key.Runtime, key.Source, key.Destination, key.Element));
+
+    /// <summary>Checks immutable accessor metadata once for each runtime and declaration pair.</summary>
+    private static bool CompareAccessors(Type runtime, Type source, Type destination, Type element)
+    {
+        MethodInfo? Resolve(MethodInfo? method)
+        {
+            if (method?.DeclaringType is not { IsInterface: true } contract)
+                return method;
+            if (runtime.IsInterface || !contract.IsAssignableFrom(runtime))
+                return method;
+            var map = runtime.GetInterfaceMap(contract);
+            int index = Array.FindIndex(map.InterfaceMethods, candidate => SameAccessor(candidate, method));
+            return index < 0 ? method : map.TargetMethods[index];
+        }
+
+        PropertyInfo? Property(Type declaration, PropertyInfo required)
+        {
+            var candidates = Properties(declaration).Where(property =>
+                property.PropertyType == required.PropertyType &&
+                (required.GetIndexParameters().Length == 1
+                    ? property.GetIndexParameters() is [{ ParameterType: var index }] && index == typeof(int)
+                    : property.GetIndexParameters().Length == 0 && property.Name == required.Name)).ToArray();
+            return candidates.FirstOrDefault(property => !candidates.Any(other =>
                 property.DeclaringType != other.DeclaringType &&
-                property.DeclaringType!.IsAssignableFrom(other.DeclaringType)))?.GetMethod;
+                property.DeclaringType!.IsAssignableFrom(other.DeclaringType)));
         }
-        var sourceIndexer = Indexer(source);
-        var destinationIndexer = Indexer(destination);
-        if (!source.IsInterface && destinationIndexer?.DeclaringType is { IsInterface: true } contract &&
-            contract.IsAssignableFrom(source))
+
+        foreach (var required in Properties(destination).Where(property =>
+            property.PropertyType == element &&
+                property.GetIndexParameters() is [{ ParameterType: var index }] && index == typeof(int) ||
+            property.PropertyType == typeof(int) && property.GetIndexParameters().Length == 0 &&
+                property.Name is "Count" or "Length"))
         {
-            // A concrete getter and the interface it implements have different metadata.
-            var map = source.GetInterfaceMap(contract);
-            int index = Array.FindIndex(map.InterfaceMethods, method => SameAccessor(method, destinationIndexer));
-            if (index >= 0)
-                destinationIndexer = map.TargetMethods[index];
+            var provided = Property(source, required);
+            foreach (var (expected, actual) in new[] { (required.GetMethod, provided?.GetMethod),
+                (required.SetMethod, provided?.SetMethod) })
+                if (expected is not null && (actual is null || !SameAccessor(Resolve(expected), Resolve(actual)!)))
+                    return false;
         }
-        return sourceIndexer is not null && destinationIndexer is not null &&
-            !SameAccessor(sourceIndexer, destinationIndexer);
+        return true;
     }
 
     /// <summary>Finds the element type of built-in segment, memory, and span representations.</summary>

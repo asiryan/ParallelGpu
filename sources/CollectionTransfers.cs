@@ -83,6 +83,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <returns>The wrapper shared by aliases using the same element type and capture representation.</returns>
     internal CapturedCollection Add<T>(object source, Type? declaredType = null)
     {
+        GpuCollectionAdapters.ValidateRuntime(source, declaredType ?? source.GetType(), typeof(T));
         bool native = (source is Array || source is List<T>) &&
             (declaredType is null || CapturedCollection.IsNativeCollection(declaredType));
         var key = (typeof(T), native ? null : declaredType ?? source.GetType());
@@ -110,7 +111,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             collection = new CapturedSliceCollection<T>(this, backing, snapshot,
                 arraySegment: source is ArraySegment<T>,
                 nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null,
-                nativeList: source is List<T> && ReferenceEquals(snapshot.Identity, source));
+                nativeList: source is List<T> ? (CapturedCollection<T>)Add<T>(source) : null);
             if (copyMemory is not null || snapshot.Commit is not null)
             {
                 if (!adapterCommits.TryGetValue(snapshot.Identity, out var callbacks))

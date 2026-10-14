@@ -13,10 +13,10 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
     /// <summary>Retains the CLR argument-range error contract of segment indexers.</summary>
     private readonly bool arraySegment;
     /// <summary>Retains the complete native representation of a list captured through its adapter.</summary>
-    private readonly bool nativeList;
+    private readonly CapturedCollection<T>? nativeList;
 
     internal CapturedSliceCollection(CollectionTransfers transfers, CapturedCollection<T> backing, GpuCollectionSnapshot<T> snapshot,
-        bool arraySegment = false, bool nullBackedSegment = false, bool nativeList = false)
+        bool arraySegment = false, bool nullBackedSegment = false, CapturedCollection<T>? nativeList = null)
     {
         this.transfers = transfers;
         this.backing = backing;
@@ -35,6 +35,7 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
         get
         {
             var view = backing.View;
+            var nativeView = nativeList?.View ?? default;
             // ILGPU rejects SubView(end, 0); empty slices never dereference byte storage.
             return new(snapshot.Count == 0 ? default :
                 view.Bytes.SubView((long)snapshot.Offset * view.ElementSize, (long)snapshot.Count * view.ElementSize),
@@ -42,8 +43,8 @@ internal sealed class CapturedSliceCollection<T> : CapturedCollection
                 shapeMetadata: transfers.Shapes, shapeOffset: shapeOffset, rank: 1, identity: Identity,
                 context: view.Context, readOnly: snapshot.IsReadOnly ? 1 : 0,
                 indexErrorCode: arraySegment ? 9 : view.IndexErrorCode,
-                nativeListBytes: nativeList ? view.Bytes : default,
-                nativeListLength: nativeList ? view.Length : 0, nativeListStorage: nativeList ? 1 : 0);
+                nativeListBytes: nativeView.Bytes, nativeListLength: nativeView.Length,
+                nativeListStorage: nativeList is null ? 0 : 1, nativeListDirtyIndex: nativeView.DirtyIndex);
         }
     }
 }
