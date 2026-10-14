@@ -5,7 +5,7 @@ using System.Reflection.Emit;
 namespace ParallelGpu;
 
 /// <summary>Recognizes and maps fixed-size device values without managed references.</summary>
-/// <remarks>Visible structures with non-auto layout, default packing, and unchanged field types retain their native
+/// <remarks>Visible structures with sequential layout, default packing, and unchanged field types retain their native
 /// representation. Other supported structures use public mirrors preserving all instance fields, with UInt16
 /// character fields and Int32 Boolean fields.</remarks>
 internal static class DeviceValueType

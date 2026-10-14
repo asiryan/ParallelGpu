@@ -5,16 +5,11 @@ using ParallelGpu;
 const int Width = 1600;
 const int Height = 1000;
 const int MaxIterations = 1000;
-
-if (args.Length > 1)
-{
-    Console.Error.WriteLine("Usage: Mandelbrot [output.png]");
-    return 1;
-}
+const string OutputFile = "artifacts/mandelbrot.png";
 
 try
 {
-    string outputPath = Path.GetFullPath(args.Length == 1 ? args[0] : Path.Combine("artifacts", "mandelbrot.png"));
+    string outputPath = Path.GetFullPath(OutputFile);
     using var gpu = new Gpu(new GpuOptions
     {
         Backend = GpuBackend.Auto,

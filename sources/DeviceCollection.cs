@@ -45,6 +45,8 @@ internal readonly struct DeviceCollection
     public readonly int NativeListLength;
     /// <summary>One when this descriptor also represents its original native list storage.</summary>
     public readonly int NativeListStorage;
+    /// <summary>The native list's write flag, which can differ from an adapted backing's flag.</summary>
+    public readonly int NativeListDirtyIndex;
 
     /// <summary>Creates a leaf or nested-array view.</summary>
     /// <param name="bytes">The leaf slice or the complete packed device buffer.</param>
@@ -66,13 +68,14 @@ internal readonly struct DeviceCollection
     /// <param name="nativeListBytes">The complete native list storage for an adapted list slice.</param>
     /// <param name="nativeListLength">The complete native list element count.</param>
     /// <param name="nativeListStorage">One when a native list projection is available, otherwise zero.</param>
+    /// <param name="nativeListDirtyIndex">The write-flag index of the native list projection.</param>
     public DeviceCollection(ArrayView<byte> bytes, int length, int rows = -1, int columns = 0,
         ArrayView<int> rowMetadata = default, int elementSize = 0,
         ArrayView<int> writes = default, int dirtyIndex = -1,
         ArrayView<int> shapeMetadata = default, int shapeOffset = -1,
         int rank = 1, int rowOffset = 0, int identity = 0, DeviceExecutionContext context = default, int readOnly = 0,
         int indexErrorCode = 3, ArrayView<byte> nativeListBytes = default, int nativeListLength = 0,
-        int nativeListStorage = 0)
+        int nativeListStorage = 0, int nativeListDirtyIndex = -1)
     {
         Bytes = bytes;
         Length = length;
@@ -93,6 +96,7 @@ internal readonly struct DeviceCollection
         NativeListBytes = nativeListBytes;
         NativeListLength = nativeListLength;
         NativeListStorage = nativeListStorage;
+        NativeListDirtyIndex = nativeListDirtyIndex;
     }
 
     /// <summary>Reads one flat leaf element without marking it as written.</summary>
@@ -203,14 +207,15 @@ internal readonly struct DeviceCollection
             collection.RowMetadata, collection.ElementSize, collection.Writes, collection.DirtyIndex,
             collection.ShapeMetadata, collection.ShapeOffset, collection.Rank, collection.RowOffset,
             collection.Identity, context, collection.IsReadOnly, collection.IndexErrorCode,
-            collection.NativeListBytes, collection.NativeListLength, collection.NativeListStorage);
+            collection.NativeListBytes, collection.NativeListLength, collection.NativeListStorage,
+            collection.NativeListDirtyIndex);
 
     /// <summary>Restores native list storage when an adapted list is used through a native declaration.</summary>
     /// <param name="collection">The native collection or adapted list slice.</param>
     /// <returns>The complete writable native list view, or the original descriptor for other collections.</returns>
     private static DeviceCollection NativeList(DeviceCollection collection) => collection.NativeListStorage == 0
         ? collection : new(collection.NativeListBytes, collection.NativeListLength,
-            elementSize: collection.ElementSize, writes: collection.Writes, dirtyIndex: collection.DirtyIndex,
+            elementSize: collection.ElementSize, writes: collection.Writes, dirtyIndex: collection.NativeListDirtyIndex,
             identity: collection.Identity, context: collection.Context, indexErrorCode: 9);
 
     /// <summary>Returns the count selected by a native List, IList, or IReadOnlyList declaration.</summary>

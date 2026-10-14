@@ -192,13 +192,23 @@ public sealed class CollectionAdapterTests(GpuFixture fixture)
     [Fact]
     public void UnrelatedRuntimeAdaptersAreRejectedWithAnExplicitDiagnostic()
     {
-        IAmbiguousA collection = new AmbiguousIndexed([1]);
-        GpuCollectionAdapters.Register<IAmbiguousA, int>(value => new(value.Buffer));
-        GpuCollectionAdapters.Register<IAmbiguousB, int>(value => new(value.Buffer));
+        AmbiguousIndexed.Register();
+        IReadOnlyList<int> collection = new AmbiguousIndexed([1]);
         int[] output = [-1];
         var error = Assert.Throws<NotSupportedException>(() => Gpu.For<int>(0, 1, i => output[i] = collection[i]));
         Assert.Contains("several unrelated", error.Message);
         Assert.Equal(new[] { -1 }, output);
+    }
+
+    [Fact]
+    public void RegisteredDeclarationResolvesUnrelatedRuntimeAdapters()
+    {
+        AmbiguousIndexed.Register();
+        IAmbiguousA first = new AmbiguousIndexed([7]);
+        IAmbiguousB second = (IAmbiguousB)first;
+        int[] output = [-1, -1];
+        Gpu.For<int>(0, 1, i => { output[0] = first[i]; output[1] = second[i]; });
+        Assert.Equal(new[] { 7, 7 }, output);
     }
 
     [Fact]
@@ -294,10 +304,20 @@ public sealed class CollectionAdapterTests(GpuFixture fixture)
     }
     private interface IAmbiguousA { int[] Buffer { get; } int this[int index] { get; } }
     private interface IAmbiguousB { int[] Buffer { get; } int this[int index] { get; } }
-    private sealed class AmbiguousIndexed(int[] buffer) : IAmbiguousA, IAmbiguousB
+    private sealed class AmbiguousIndexed(int[] buffer) : IAmbiguousA, IAmbiguousB, IReadOnlyList<int>
     {
+        private static readonly Lazy<bool> registered = new(() =>
+        {
+            GpuCollectionAdapters.Register<IAmbiguousA, int>(value => new(value.Buffer));
+            GpuCollectionAdapters.Register<IAmbiguousB, int>(value => new(value.Buffer));
+            return true;
+        });
+        public static void Register() => _ = registered.Value;
         public int[] Buffer { get; } = buffer;
+        public int Count => Buffer.Length;
         public int this[int index] => Buffer[index];
+        public IEnumerator<int> GetEnumerator() => ((IEnumerable<int>)Buffer).GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
     private struct FrozenIndexedValue
     {

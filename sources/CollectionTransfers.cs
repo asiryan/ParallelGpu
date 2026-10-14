@@ -19,8 +19,8 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     private readonly Dictionary<object, int> identities = new(ReferenceIdentityComparer.Instance);
     /// <summary>Shared staged snapshots keyed by their host storage identities.</summary>
     private readonly Dictionary<object, object> adapterSnapshots = new(ReferenceIdentityComparer.Instance);
-    /// <summary>One host commit per storage identity, retaining its shared backing leaf write flag.</summary>
-    private readonly Dictionary<object, (int DirtyIndex, Action Commit)> adapterCommits =
+    /// <summary>Native memory copyback and one user commit per storage identity, sharing the leaf write flag.</summary>
+    private readonly Dictionary<object, (int DirtyIndex, Action? CopyMemory, Action? Commit)> adapterCommits =
         new(ReferenceIdentityComparer.Instance);
     /// <summary>Packed device buffers grouped by element type for the current invocation.</summary>
     private readonly Dictionary<Type, CollectionBatch> batches = new();
@@ -83,6 +83,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
     /// <returns>The wrapper shared by aliases using the same element type and capture representation.</returns>
     internal CapturedCollection Add<T>(object source, Type? declaredType = null)
     {
+        GpuCollectionAdapters.ValidateRuntime(source, declaredType ?? source.GetType(), typeof(T));
         bool native = (source is Array || source is List<T>) &&
             (declaredType is null || CapturedCollection.IsNativeCollection(declaredType));
         var key = (typeof(T), native ? null : declaredType ?? source.GetType());
@@ -96,7 +97,7 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             return existing;
         CapturedCollection collection;
         if (!native &&
-            GpuCollectionAdapters.TryCapture<T>(source, adapterSnapshots, out var snapshot))
+            GpuCollectionAdapters.TryCapture<T>(source, declaredType, adapterSnapshots, out var snapshot, out var copyMemory))
         {
             var backing = (CapturedCollection<T>)Add<T>(snapshot.Identity is Array || snapshot.Identity is List<T>
                 ? snapshot.Identity : snapshot.Buffer);
@@ -110,9 +111,19 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             collection = new CapturedSliceCollection<T>(this, backing, snapshot,
                 arraySegment: source is ArraySegment<T>,
                 nullBackedSegment: source is ArraySegment<T> segment && segment.Array is null,
-                nativeList: source is List<T> && ReferenceEquals(snapshot.Identity, source));
-            if (snapshot.Commit is not null && !adapterCommits.ContainsKey(snapshot.Identity))
-                adapterCommits.Add(snapshot.Identity, (backing.DirtyIndex, () => snapshot.Commit(snapshot.Buffer)));
+                nativeList: source is List<T> ? (CapturedCollection<T>)Add<T>(source) : null);
+            if (copyMemory is not null || snapshot.Commit is not null)
+            {
+                if (!adapterCommits.TryGetValue(snapshot.Identity, out var callbacks))
+                    callbacks = (backing.DirtyIndex, null, null);
+                // Native memory may be captured before or after a notification-only user adapter.
+                // Keep both actions; a later capture must not replace the first user callback.
+                if (callbacks.CopyMemory is null && copyMemory is not null)
+                    callbacks.CopyMemory = () => copyMemory(snapshot.Buffer);
+                if (callbacks.Commit is null && snapshot.Commit is not null)
+                    callbacks.Commit = () => snapshot.Commit(snapshot.Buffer);
+                adapterCommits[snapshot.Identity] = callbacks;
+            }
         }
         else
             collection = source is Array nested && nested.GetType().GetElementType()!.IsArray
@@ -221,7 +232,10 @@ internal sealed class CollectionTransfers(Gpu gpu) : IDisposable
             batch.CopyBack(written);
         foreach (var commit in adapterCommits.Values)
             if (written[commit.DirtyIndex] != 0)
-                commit.Commit();
+            {
+                commit.CopyMemory?.Invoke();
+                commit.Commit?.Invoke();
+            }
     }
 
     /// <summary>Releases all packed data and metadata buffers owned by this invocation.</summary>

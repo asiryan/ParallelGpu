@@ -4,8 +4,8 @@ using System.Reflection.Emit;
 namespace ParallelGpu;
 
 /// <summary>Provides integer failure guards, bit-based floating remainder and CopySign, and NaN-aware extrema.</summary>
-/// <remarks>Guards defer integer division-by-zero and signed overflow errors; evaluation of valid arithmetic
-/// still follows ILGPU backend behavior, including CUDA constant-division optimizations.</remarks>
+/// <remarks>Guards defer integer division-by-zero and signed overflow errors. Power-of-two integer division
+/// uses explicit unsigned shifts to preserve CLR truncation and unsigned semantics across backends.</remarks>
 internal static class DeviceArithmetic
 {
     internal static bool IsDivision(OpCode code) => code == OpCodes.Div || code == OpCodes.Div_Un ||
@@ -146,22 +146,40 @@ internal static class DeviceArithmetic
     {
         if (right == 0) { context.Fail(11); return 0; }
         if (left == int.MinValue && right == -1) { context.Fail(12); return 0; }
+        uint divisor = right < 0 ? unchecked(0U - (uint)right) : (uint)right;
+        if ((divisor & (divisor - 1)) == 0)
+        {
+            uint dividend = left < 0 ? unchecked(0U - (uint)left) : (uint)left;
+            uint quotient = dividend >> (31 - IntrinsicMath.LeadingZeroCount(divisor));
+            return (left < 0) != (right < 0) ? unchecked((int)(0U - quotient)) : (int)quotient;
+        }
         return left / right;
     }
     public static long DivideInt64(long left, long right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return 0; }
         if (left == long.MinValue && right == -1) { context.Fail(12); return 0; }
+        ulong divisor = right < 0 ? unchecked(0UL - (ulong)right) : (ulong)right;
+        if ((divisor & (divisor - 1)) == 0)
+        {
+            ulong dividend = left < 0 ? unchecked(0UL - (ulong)left) : (ulong)left;
+            ulong quotient = dividend >> (63 - IntrinsicMath.LeadingZeroCount(divisor));
+            return (left < 0) != (right < 0) ? unchecked((long)(0UL - quotient)) : (long)quotient;
+        }
         return left / right;
     }
     public static uint DivideUInt32(uint left, uint right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return 0; }
+        if ((right & (right - 1)) == 0)
+            return left >> (31 - IntrinsicMath.LeadingZeroCount(right));
         return left / right;
     }
     public static ulong DivideUInt64(ulong left, ulong right, DeviceExecutionContext context)
     {
         if (right == 0) { context.Fail(11); return 0; }
+        if ((right & (right - 1)) == 0)
+            return left >> (63 - IntrinsicMath.LeadingZeroCount(right));
         return left / right;
     }
     public static int RemainderInt32(int left, int right, DeviceExecutionContext context)

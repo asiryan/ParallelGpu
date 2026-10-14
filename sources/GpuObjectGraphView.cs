@@ -4,14 +4,16 @@ namespace ParallelGpu;
 
 /// <summary>A device view over bounded object records, outgoing references, and graph roots.</summary>
 /// <typeparam name="TRecord">The unmanaged, ILGPU-supported payload type.</typeparam>
-/// <remarks>Null, shared references, and cycles use stable graph-specific handles. Existing records
-/// and links may be edited; concurrent creation reserves distinct records and reference ranges. New objects must be
-/// read by other iterations only in a later kernel, after their creating kernel has completed. Concurrent changes to
-/// the same payload, reference slot, or root still require synchronization by the caller.
-/// Invalid references and capacity exhaustion are recorded and rejected on host download. Lambda
-/// captures validate ownership and lifetime before launch and require a public payload that needs no
-/// automatic value conversion. Views in explicit value kernels must
-/// not outlive their graph and must be used only by its owning executor.</remarks>
+/// <remarks>
+/// <para>Null, shared references, and cycles use stable graph-specific handles. Records and links may
+/// be edited; concurrent creation reserves distinct storage. An iteration may use its own new objects
+/// immediately, but other iterations may read them only in a later kernel. Concurrent writes to the same
+/// payload, reference slot, or root require caller synchronization.</para>
+/// <para>Invalid access or capacity exhaustion invalidates the graph and is reported by Download or
+/// CopyToHost. Lambda captures validate ownership and lifetime before launch and require a public payload
+/// that needs no automatic value conversion. Explicit kernels must keep views alive and use them only
+/// with the graph's owning executor.</para>
+/// </remarks>
 public readonly struct GpuObjectGraphView<TRecord> : IDeviceNativeView where TRecord : unmanaged
 {
     /// <summary>The host-validated allocation lifetime.</summary>
@@ -147,8 +149,8 @@ public readonly struct GpuObjectGraphView<TRecord> : IDeviceNativeView where TRe
     /// <param name="referenceCount">The nonnegative number of outgoing references.</param>
     /// <param name="handle">The newly allocated reference, or null when allocation fails.</param>
     /// <returns>True when the complete record was initialized; otherwise false.</returns>
-    /// <remarks>Record and reference reservations use separate atomics. On failure, reservations are
-    /// not rolled back and host download rejects the graph.</remarks>
+    /// <remarks>Allocation failure invalidates the graph even when the caller handles the false result.
+    /// Download and CopyToHost then reject it; dispose and upload a graph with sufficient capacity.</remarks>
     public bool TryCreate(TRecord value, int referenceCount, out GpuObjectHandle handle)
     {
         handle = default;

@@ -8,7 +8,7 @@ namespace ParallelGpu;
 /// <param name="Element">The supported collection element type, or null for a scalar.</param>
 internal sealed record LoopCapture(FieldInfo[] Path, FieldInfo Destination, Type? Element)
 {
-    /// <summary>The native list runtime type used by collection preflight, resolved once per capture.</summary>
+    /// <summary>The List&lt;T&gt; type used to validate runtime captures, resolved once per capture.</summary>
     internal Type? NativeListType { get; } = Element is null ? null : typeof(List<>).MakeGenericType(Element);
 
     /// <summary>Reads the current captured value by following the original field path.</summary>

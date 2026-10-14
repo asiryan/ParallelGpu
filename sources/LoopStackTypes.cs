@@ -79,9 +79,15 @@ internal static class LoopStackTypes
             if (element is null || element != CollectionElement(right))
                 return typeof(MergedCollectionReference);
             if (left!.IsAssignableFrom(right))
+            {
+                ValidateIndexerConversion(right!, left, element);
                 return left;
+            }
             if (right!.IsAssignableFrom(left))
+            {
+                ValidateIndexerConversion(left, right, element);
                 return right;
+            }
             return typeof(MergedCollectionReference<>).MakeGenericType(element);
         }
         int width = DeviceArithmetic.IntegerWidth(left);
@@ -106,6 +112,14 @@ internal static class LoopStackTypes
             ? type.GetGenericArguments()[0] : type is null ? null : CapturedCollection.ElementType(type);
     }
 
+    /// <summary>Rejects upcasts whose destination indexer needs a separately captured adapter view.</summary>
+    private static void ValidateIndexerConversion(Type source, Type destination, Type element)
+    {
+        if (GpuCollectionAdapters.ChangesIndexer(source, destination, element))
+            throw new NotSupportedException("An implicit collection conversion changes the registered GPU indexer or Count. " +
+                "Capture the collection through the required declaration separately.");
+    }
+
     /// <summary>Rejects implicit reference conversions that would reinterpret a mapped collection's element storage.</summary>
     private static void ValidateCollectionConversion(MethodBase method, LoopInstruction instruction, List<Type?> stack)
     {
@@ -120,6 +134,8 @@ internal static class LoopStackTypes
                 CollectionElement(source) != element)
                 throw new NotSupportedException("An implicit collection conversion changes the GPU element type. " +
                     "Capture the collection through the required native declaration separately.");
+            if (source is not null && IsCollectionReference(source) && destination is not null && element is not null)
+                ValidateIndexerConversion(source, destination, element);
         }
 
         var code = instruction.Code;
@@ -129,11 +145,18 @@ internal static class LoopStackTypes
             var parameters = called.GetParameters();
             for (int i = 0; i < parameters.Length; i++)
                 Check(stack[stack.Count - parameters.Length + i], parameters[i].ParameterType);
-            // Direct registered receivers can intentionally adapt inherited members. At a
-            // merged receiver there is no such declaration to select an adapter safely.
-            if (code != OpCodes.Newobj && !called.IsStatic &&
-                IsMergedCollectionReference(stack[stack.Count - parameters.Length - 1]))
-                Check(stack[stack.Count - parameters.Length - 1], called.DeclaringType);
+            if (code != OpCodes.Newobj && !called.IsStatic)
+            {
+                var receiver = stack[stack.Count - parameters.Length - 1];
+                // Inherited accessors can use the receiver's registered adapter. A hidden
+                // indexer or Count needs its own capture, even if an optimizer omitted the upcast local.
+                if (IsMergedCollectionReference(receiver))
+                    Check(receiver, called.DeclaringType);
+                else if (receiver is not null && CollectionElement(receiver) is Type element &&
+                    called is MethodInfo member && called.DeclaringType is Type declaring &&
+                    GpuCollectionAdapters.AccessorOperation(declaring, member, element) is not null)
+                    ValidateIndexerConversion(receiver, declaring, element);
+            }
         }
         else if (code.Name!.StartsWith("stloc", StringComparison.Ordinal))
         {

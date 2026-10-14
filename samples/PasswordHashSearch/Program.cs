@@ -2,7 +2,7 @@ using System.Diagnostics;
 using ParallelGpu;
 using PasswordHashSearch;
 
-// Set the demo password and candidate length range here. The search receives only the hash.
+// Set the demo password, candidate lengths, batch size, and time budget here.
 const string DemoPassword = "qwerty";
 const int MinimumPasswordLength = 1;
 const int MaximumPasswordLength = 6;
