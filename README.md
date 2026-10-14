@@ -110,4 +110,4 @@ Tests default to `Cpu`; the environment variable also accepts `Cuda`, `OpenCL`, 
 
 # License
 
-[MIT](LICENSE)
+**MIT**
