@@ -418,7 +418,7 @@ internal sealed class LambdaKernel
     private static bool IsCaptureType(Type type) => IsScalar(type) ||
         CapturedCollection.ElementType(type) is not null;
 
-    /// <summary>Checks whether a type is a supported value or an explicitly owned native device view.</summary>
+    /// <summary>Checks whether a type is a supported value or a borrowed native device view.</summary>
     /// <param name="type">The candidate scalar type.</param>
     /// <returns>True for supported values, native buffer, append, or graph views, or the execution context.</returns>
     private static bool IsScalar(Type type) => CapturedCollection.IsSupportedElementType(type) || DeviceNativeTypes.IsSupported(type);

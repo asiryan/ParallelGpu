@@ -48,10 +48,9 @@ public sealed partial class Gpu
     /// <param name="buffer">A live input buffer owned by this executor.</param>
     /// <param name="operation">The associative operation and its device-compatible state.</param>
     /// <returns>The ordered reduction, or the operation's identity for empty input.</returns>
-    /// <remarks>Each pass reduces consecutive segments in shared memory. Passes use the same stream,
-    /// and only the final value is copied to the host. No global atomic accumulator is used.
-    /// Empty input evaluates Identity on the host; a single element is returned without calling Combine.
-    /// Both cases skip device kernel compilation.</remarks>
+    /// <remarks>Only the final value is copied to the host. Input order is preserved, but parallel
+    /// grouping can change floating-point rounding. Empty input evaluates Identity on the host;
+    /// a single element is returned without calling Combine. Both cases skip kernel compilation.</remarks>
     /// <exception cref="ArgumentNullException">The input buffer is null.</exception>
     /// <exception cref="ArgumentException">The buffer belongs to another executor or a type is not public.</exception>
     /// <exception cref="NotSupportedException">A value cannot fit in device shared memory.</exception>

@@ -3,8 +3,8 @@ using ILGPU.Algorithms;
 
 namespace ParallelGpu;
 
-/// <summary>Lowers supported framework math with double intermediates and explicit exceptional-value handling.</summary>
-/// <remarks>Results are approximate, not necessarily correctly rounded; Exp and Pow can differ at underflow and overflow
+/// <summary>Provides device implementations of supported framework math.</summary>
+/// <remarks>Transcendental results are approximate; Exp and Pow can differ at underflow and overflow
 /// boundaries. Floating-point evaluation also depends on ILGPU backend optimizations.</remarks>
 internal static partial class DeviceExtendedMath
 {

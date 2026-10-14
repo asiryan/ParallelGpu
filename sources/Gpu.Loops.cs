@@ -26,54 +26,42 @@ public sealed partial class Gpu
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">A loop body using supported values, collections, helpers, and GPU views.</param>
     /// <remarks>
-    /// <para>Collections include rectangular arrays of any CLR-supported rank, nested and mixed arrays,
-    /// lists, memory slices, and registered adapters. Elements may be supported primitives, enums, nullable values,
-    /// or structures without managed references. Aliases and array lower bounds are preserved.
-    /// Lists and contiguous views require value elements; access nested arrays directly.
-    /// Constructors and compatible helpers accept values and collections. Captured descriptors and scalar values
-    /// are read-only. Explicit layouts and native pointer fields are unsupported.</para>
-    /// <para>Captures, including volatile fields, use host snapshots refreshed on every call.
-    /// Deferred loop errors are checked before automatic host
-    /// copyback and adapter commits. Empty and reversed ranges skip compilation and execution.</para>
-    /// <para>Iterations are unordered; shared writes require synchronization such as atomics or a reduction.
-    /// Captured buffer, append, and graph views must be live and owned by this executor. Their device writes
-    /// are not rolled back on a loop failure; append and graph result APIs check their own deferred errors.</para>
-    /// <para>Requires an ordinary void(int) method with inspectable IL and runtime code generation.
-    /// Closed static delegates with bound arguments, DynamicMethod delegates, and Native AOT are unsupported.</para>
+    /// <para>Supports arrays (including nested arrays and nonzero lower bounds), lists, memory slices,
+    /// and registered collection adapters. Elements may be supported primitives, enums, nullable values,
+    /// or structures without managed references, explicit layout, pointer fields, inline arrays, or fixed
+    /// buffers. Lists and contiguous views require value elements. Compatible constructors and helpers are supported.</para>
+    /// <para>Captured scalars and collection references are read-only snapshots refreshed on each call;
+    /// collection elements may be changed. Shared storage is preserved. Loop errors are checked before
+    /// automatic host copies and adapter commits. Empty and reversed ranges do nothing.</para>
+    /// <para>Iterations are unordered; shared writes require atomics or another synchronization scheme.
+    /// Native device views must be live and owned by this executor. Their writes are not rolled back
+    /// on failure; append and graph results require their own host validation.</para>
+    /// <para>Requires a single ordinary <c>void(int)</c> delegate with inspectable IL and runtime code
+    /// generation. Bound static delegates, DynamicMethod delegates, and Native AOT are unsupported.</para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">An intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, a rounding mode is invalid, or an ArraySegment constructor range exceeds its array.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used invalid rounding digits, an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
-    /// <exception cref="NotSupportedException">The body uses unsupported operations, including checked integer arithmetic or conversions, or a captured collection is unsupported.</exception>
+    /// <exception cref="ArgumentNullException">The body or a required constructor argument is null.</exception>
+    /// <exception cref="ArgumentException">A capture, native view owner, or argument to a translated method is invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The range exceeds Int32.MaxValue iterations, or a translated collection or math operation receives an out-of-range argument.</exception>
+    /// <exception cref="NotSupportedException">The body, value type, or collection uses an unsupported feature.</exception>
     /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
     /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
-    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
-    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
+    /// <exception cref="IndexOutOfRangeException">An array, span, or adapted collection access is out of bounds.</exception>
+    /// <exception cref="InvalidOperationException">The loop read an empty nullable, required storage from a null-backed ArraySegment, or wrote to a read-only collection.</exception>
     /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
-    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
+    /// <exception cref="OverflowException">Signed integer division, remainder, or Math.Abs overflowed.</exception>
     /// <exception cref="ArithmeticException">Math.Sign or MathF.Sign received NaN.</exception>
     public void For(int fromInclusive, int toExclusive, Action<int> body) =>
         ForBody(fromInclusive, toExclusive, body, null);
 
-    /// <summary>Executes an ordinary loop body whose captured collections share one supported element type.</summary>
-    /// <typeparam name="T">The ultimate element type of every captured collection: a supported primitive, enum, nullable value, or device-compatible structure without managed references.</typeparam>
+    /// <summary>Executes an ordinary loop body whose automatically transferred collections share one supported element type.</summary>
+    /// <typeparam name="T">The element type shared by automatically transferred collections, including the innermost arrays of jagged arrays.</typeparam>
     /// <param name="fromInclusive">The inclusive lower bound of the range.</param>
     /// <param name="toExclusive">The exclusive upper bound of the range.</param>
     /// <param name="body">The device-compatible loop body.</param>
-    /// <remarks>Use the non-generic overload for mixed collection element types.
-    /// Compilation and transfers are automatic, and results are available on return.
-    /// The element type is validated even for empty and reversed ranges; other execution rules match the non-generic overload.</remarks>
-    /// <exception cref="ArgumentNullException">The body is null, or an ArraySegment constructor receives a null array.</exception>
-    /// <exception cref="ArgumentException">A captured collection has a different element type, an intermediate capture object is null, a captured native view belongs to another executor, Math.Clamp used inverted bounds, a rounding mode is invalid, or an ArraySegment constructor range exceeds its array.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The range contains more than Int32.MaxValue iterations, or the loop used invalid rounding digits, an invalid list or ArraySegment index, invalid slice, or negative ArraySegment constructor offset or count.</exception>
-    /// <exception cref="NotSupportedException">The element type, body, or captured collection is unsupported, including checked integer arithmetic or conversions.</exception>
-    /// <exception cref="ObjectDisposedException">The executor or a captured native view has been disposed.</exception>
-    /// <exception cref="NullReferenceException">The loop accessed a null collection.</exception>
-    /// <exception cref="IndexOutOfRangeException">The loop accessed an invalid array or span index, array dimension, or index into a registered adapter snapshot.</exception>
-    /// <exception cref="InvalidOperationException">The loop accessed an empty nullable, used a null-backed ArraySegment operation requiring storage, or wrote a read-only view.</exception>
-    /// <exception cref="DivideByZeroException">Integer division or remainder used a zero divisor.</exception>
-    /// <exception cref="OverflowException">Signed integer division or remainder of the minimum value by -1, or signed integer Math.Abs overflowed.</exception>
-    /// <exception cref="ArithmeticException">Math.Sign or MathF.Sign received NaN.</exception>
+    /// <remarks>Execution rules and errors match <see cref="For(int, int, Action{int})"/>.
+    /// Use that overload for mixed element types. This overload validates T even for empty or reversed ranges.</remarks>
+    /// <inheritdoc cref="For(int, int, Action{int})" path="/exception[not(@cref='T:System.ArgumentException')]"/>
+    /// <exception cref="ArgumentException">A captured collection has a different element type, or a capture, native view owner, or translated method argument is invalid.</exception>
     public void For<T>(int fromInclusive, int toExclusive, Action<int> body)
     {
         LambdaKernel.ValidateElementType(typeof(T));

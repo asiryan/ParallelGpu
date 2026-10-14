@@ -6,12 +6,13 @@ using System.Runtime.InteropServices;
 namespace ParallelGpu;
 
 /// <summary>Registers host-only snapshots for custom indexed collections used in ordinary GPU loops.</summary>
-/// <remarks>Register before GPU compilation first inspects the type. Each type can be registered once.
-/// GPU bodies can use its integer indexer (including inherited or renamed indexers) and Count or Length
-/// property. Device lengths come from the snapshot's Count; adapter callbacks run on the host.
-/// Registered list subclasses use adapters when captured through their registered declaration;
-/// List, IList, and IReadOnlyList declarations use native array or list storage. A registered
-/// capture declaration selects its own adapter before runtime adapter resolution.</remarks>
+/// <remarks>
+/// <para>Register each type once, before it is first used in a GPU loop. Loop bodies can use its integer
+/// indexer (including inherited or renamed indexers) and Count or Length property. The snapshot supplies
+/// the accessible length and storage; adapter callbacks run on the host.</para>
+/// <para>The declared capture type selects a registered adapter before the runtime type is considered.
+/// Capturing a registered List subclass as List, IList, or IReadOnlyList uses native list storage instead.</para>
+/// </remarks>
 public static class GpuCollectionAdapters
 {
     private sealed record Adapter(Type Declaration, Type Element, Func<object, object> Capture);

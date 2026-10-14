@@ -3,7 +3,7 @@ using System.Numerics;
 using FastFourierTransform;
 using ParallelGpu;
 
-// Matrix of complex doubles.
+// Set the matrix dimensions (powers of two) and normalization here.
 const int Rows = 4096;
 const int Columns = 4096;
 const bool Normalized = true;

@@ -1,6 +1,6 @@
 # ParallelGpu
 
-Synchronous C# loops on [CUDA](https://developer.nvidia.com/cuda) or [OpenCL](https://www.khronos.org/opencl/), powered by [ILGPU](https://ilgpu.net). Write a lambda over captured collections; the library compiles it for the selected device, transfers the data, and copies results back before the call returns.
+Synchronous C# loops on [CUDA](https://developer.nvidia.com/cuda) or [OpenCL](https://www.khronos.org/opencl/), powered by [ILGPU](https://ilgpu.net). Write a lambda over captured collections; ParallelGpu compiles it, transfers the data, and copies results back before returning.
 
 ## Installation
 
@@ -21,59 +21,45 @@ gpu.For(0, input.Length, i => output[i] = input[i] * 2);
 // output: 2, 4, 6
 ```
 
-Reuse a `Gpu` instance to retain the accelerator and compiled kernels. `GpuParallel.For(...)` also provides a static API.
+Reuse a `Gpu` instance to retain the accelerator and compiled kernels. `GpuParallel.For(...)` provides a static alternative.
 
 ## Backend selection
 
-The default backend is `Auto`. It tries CUDA first, then OpenCL. CPU fallback is disabled by default; enable it explicitly when an application should also run without a compatible GPU:
-
-```csharp
-using var gpu = new Gpu(new GpuOptions
-{
-    Backend = GpuBackend.Auto,
-    AllowCpuFallback = true
-});
-```
-
 | Backend | Requirements and behavior |
 | --- | --- |
-| `Auto` | Tries available GPUs in CUDA-first order; CPU fallback requires `AllowCpuFallback = true`. |
+| `Auto` (default) | Tries CUDA, then OpenCL. Set `AllowCpuFallback = true` in `GpuOptions` to allow CPU fallback. |
 | `Cuda` | Requires an NVIDIA GPU and a compatible CUDA driver. |
-| `OpenCL` | Requires a compatible GPU and OpenCL runtime with OpenCL C 2.0 or newer and generic address-space support. An OpenCL 3.0 version label alone is insufficient. |
+| `OpenCL` | Requires a GPU runtime with OpenCL C 2.0 or newer and generic address spaces; an OpenCL 3.0 version label alone is insufficient. |
 | `Cpu` | Uses the ILGPU CPU accelerator for debugging and correctness checks. |
 
-Explicit `Cuda` and `OpenCL` selections never fall back to CPU. Use `GpuOptions.DeviceIndex` to select a device, and inspect `gpu.Backend`, `gpu.DeviceName`, and `gpu.IsGpu` after initialization.
+Select a backend with `new Gpu(new GpuOptions { Backend = GpuBackend.Cuda })`. Explicit `Cuda` and `OpenCL` selections never fall back to CPU. `gpu.Backend` and `gpu.DeviceName` identify the selected device.
+
+The test suite passes on CPU and CUDA. OpenCL has not been verified in the current test environment.
 
 ## Capabilities
 
-- Automatic transfers for arrays of any rank, jagged arrays, fixed-size lists, and supported memory views, with shared storage preserved.
-- Automatic value mappings for numeric types, `bool`, `char`, enums, supported structures, and nullable values.
-- Device buffers via `Upload<T>` and `Allocate<T>` to retain data between kernels, with partial `CopyFrom`/`CopyTo` transfers using array offsets/counts or spans.
-- Backend-independent `GpuView<T>` from `buffer.DeviceView` to use the same lambda API with data retained on the device.
-- Explicit value kernels through `IGpuForKernel` and `IGpuForEachKernel<T>`.
-- Reductions, atomic operations, and bounded append buffers for variable output.
-- Host collection adapters support inherited and renamed indexers, including `List<T>`-derived collections; snapshots preserve slices, read-only access, shared identities and one host commit per identity. Registered capture declarations select their own adapters before runtime resolution. Native list helper parameters and return values expose the original full list even when its adapter uses separate storage; writes and commits follow the accessed storage. The custom declaration retains its snapshot slice and read-only restrictions. Runtime adapter resolution requires compatible interface indexers and Count; List subclasses that reimplement native interface accessors are rejected before capture callbacks. Native memory-manager aliases copy updated storage back before the user commit, regardless of capture order. Implicit reference conversions that change the element type or switch to a different indexer or Count/Length accessor are unsupported; capture the required declaration separately. Explicit object-graph adapters support custom data models.
-- Floating-point `%` and .NET 8 `Math`/`MathF` overloads for the supported numeric types, including trigonometry, hyperbolic functions, logarithms, rounding modes, fused multiply-add, IEEE helpers, `BigMul`, and both `DivRem` forms. Overloads using `decimal`, `nint`, or `nuint` are excluded.
+- Arrays of any rank, jagged arrays, fixed-size list operations, and supported memory views, preserving shared storage.
+- Numeric types, `bool`, `char`, enums, supported value structures, and nullable values.
+- Persistent device buffers, explicit value kernels, reductions, atomics, and bounded append buffers.
+- Custom collection and object-graph adapters, plus supported .NET 8 `Math`/`MathF` operations.
 
 ## Execution requirements and limitations
 
-The automatic lambda API requires runtime code generation (`Reflection.Emit`) and access to method IL. Delegates must target an ordinary `void Method(int)`; closed static delegates with bound arguments and `DynamicMethod` delegates are unsupported. It is not supported in [Native AOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) applications.
+The automatic lambda API requires runtime code generation (`Reflection.Emit`) and access to method IL. Use an ordinary `void Method(int)` delegate; Native AOT and `DynamicMethod` delegates are unsupported.
 
-Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Scalar captures, including volatile fields, use host snapshots refreshed per call and are read-only; collection elements may be writable, but collection sizes and array topology cannot change during execution.
+Loop iterations are unordered. Use independent writes, atomics, or reductions to avoid races. Captured scalars are read-only snapshots. Collection elements may be writable, but sizes and references between arrays cannot change during a loop.
 
-Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Automatic structure mappings cannot contain managed references, native pointers, or explicit layout. Inline arrays and fixed buffers are unsupported, including in nested structures. Lists, segments, memory, and spans require supported value elements; access nested arrays directly through jagged-array descriptors. Direct device buffers require unmanaged ILGPU-compatible types; explicit kernel types, `ForEach`/`Reduce` elements, and lambda native-view payloads must be public.
+Loop bodies and their helpers must be device-compatible. Arbitrary .NET methods, managed allocation, boxing, reflection, exception handlers, and checked integer arithmetic are unsupported. Value structures must satisfy the [supported type rules](https://github.com/asiryan/ParallelGpu/blob/dev/docs/guide.md); device buffers and explicit kernels have stricter ILGPU type requirements.
 
-Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers and download results when needed. Transfers and kernel compilation can outweigh the benefit of GPU execution for small or inexpensive workloads.
+Automatic loops transfer captured collections on every call. For repeated operations, keep data in device buffers. Transfers and compilation can outweigh GPU gains for small workloads.
 
-`GpuView<T>` borrows device memory. Lambda captures validate its owner and lifetime before execution; indices must be in range in both lambdas and explicit kernels. Device buffer writes are not rolled back on later errors.
+`GpuView<T>` borrows device memory: keep its owner alive and use valid indices. Detected loop errors prevent automatic collection copyback, but device buffer writes and host callback effects are not rolled back.
 
-Bounds, null access, read-only writes and guarded arithmetic errors become host exceptions before automatic collection copyback, including `ref` access in value constructors. Translated ordinary bodies and helpers stop after a deferred failure so fallback values cannot keep their loops running. `ArraySegment<T>` constructor validation follows CLR behavior. Large loops may use several launches with shared device storage; copyback requires every launch to succeed. Owned device buffers and callback side effects are not rolled back.
-
-Calls on one `Gpu` instance are serialized. Avoid modifying transferred host collections concurrently, and dispose the executor and its buffers when finished. Transcendental functions are approximate; compare with a numerical tolerance. Floating-point reduction results may differ from sequential CPU results and between devices.
+Calls on one `Gpu` instance are serialized. Avoid concurrent host changes to transferred collections, and dispose the executor and its buffers when finished. Floating-point results may differ between devices; transcendental functions and reductions require suitable numerical tolerances.
 
 ## Documentation and examples
 
-See the [ParallelGpu repository](https://github.com/asiryan/ParallelGpu) for the full API guide, supported math operations, collection and object-graph examples, and sample applications.
+See the [API guide](https://github.com/asiryan/ParallelGpu/blob/dev/docs/guide.md), [supported math operations](https://github.com/asiryan/ParallelGpu/blob/dev/docs/math.md), and [sample applications](https://github.com/asiryan/ParallelGpu/tree/dev/samples).
 
 ## License
 

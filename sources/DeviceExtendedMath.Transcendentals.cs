@@ -2,7 +2,7 @@ using ILGPU;
 
 namespace ParallelGpu;
 
-/// <summary>Provides bounded-range trigonometric, hyperbolic, root, and logarithm lowering.</summary>
+/// <summary>Provides trigonometric, hyperbolic, root, and logarithm approximations.</summary>
 /// <remarks>Results are approximate; range reduction and polynomial evaluation use double intermediates.</remarks>
 internal static partial class DeviceExtendedMath
 {
@@ -65,7 +65,7 @@ internal static partial class DeviceExtendedMath
         return (Interop.FloatAsInt(value) >> 63) != 0 ? -tangent : tangent;
     }
 
-    /// <summary>Evaluates sine and cosine on [-pi/4, pi/4] without CORDIC's absolute error near zero.</summary>
+    /// <summary>Computes tangent as a ratio of sine and cosine series on [-pi/4, pi/4].</summary>
     private static double TanReduced(double reduced)
     {
         double square = reduced * reduced;
