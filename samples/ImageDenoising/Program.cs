@@ -2,34 +2,40 @@ using System.Diagnostics;
 using ImageDenoising;
 using ParallelGpu;
 
+// Change the input, noise, and filter parameters here before running the sample.
+string inputPath = Path.Combine(AppContext.BaseDirectory, "Assets", "input.png");
+const string OutputDirectory = "artifacts/image-denoising";
+const float Sigma = 20;
+const float Strength = 0.55f;
+const int SearchRadius = 10;
+const int PatchRadius = 1;
+const ulong Seed = 42;
+bool generateNoise = true;
+
 try
 {
-    DenoisingSettings settings = DenoisingSettings.Parse(args);
-    if (settings.ShowHelp)
-    {
-        Console.WriteLine("Usage: ImageDenoising [input.png] [--output DIR] [--sigma N] [--strength N] [--search-radius N] [--patch-radius N] [--seed N] [--skip-noise]");
-        Console.WriteLine("Defaults: bundled image, artifacts/image-denoising, sigma 20, strength 0.55, search radius 10, patch radius 1, seed 42.");
-        Console.WriteLine("--skip-noise filters an already noisy image, including a RayTracer PNG.");
-        Console.WriteLine("Output: original.png, before.png (filter input), after.png (filtered result).");
-        return 0;
-    }
+    inputPath = Path.GetFullPath(inputPath);
+    string outputDirectory = Path.GetFullPath(OutputDirectory);
+    foreach (string outputName in new[] { "original.png", "before.png", "after.png" })
+        if (string.Equals(inputPath, Path.Combine(outputDirectory, outputName), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Choose an output directory that does not overwrite the input image.");
 
-    RgbImage image = ImageFiles.Load(settings.InputPath);
+    RgbImage image = ImageFiles.Load(inputPath);
     using var gpu = new Gpu(new GpuOptions { Backend = GpuBackend.Auto });
     Console.WriteLine($"Device: {gpu.DeviceName} ({gpu.Backend})");
-    Console.WriteLine($"Input: {settings.InputPath}; {image.Width} x {image.Height}");
-    Console.WriteLine(settings.SkipNoise ? "Noise generation: skipped; input is already noisy" : $"Gaussian noise: sigma {settings.Sigma:G}, seed {settings.Seed}; clamped and rounded to RGB bytes");
-    Console.WriteLine($"Non-Local Means: {settings.SearchRadius * 2 + 1} x {settings.SearchRadius * 2 + 1} search window; {settings.PatchRadius * 2 + 1} x {settings.PatchRadius * 2 + 1} RGB patches; strength {settings.Strength:G}");
+    Console.WriteLine($"Input: {inputPath}; {image.Width} x {image.Height}");
+    Console.WriteLine(generateNoise ? $"Gaussian noise: sigma {Sigma:G}, seed {Seed}; clamped and rounded to RGB bytes" : "Noise generation: skipped; input is already noisy");
+    Console.WriteLine($"Non-Local Means: {SearchRadius * 2 + 1} x {SearchRadius * 2 + 1} search window; {PatchRadius * 2 + 1} x {PatchRadius * 2 + 1} RGB patches; strength {Strength:G}");
 
     // Warm up all processing kernels on a tiny image before measuring the actual input.
     var timer = Stopwatch.StartNew();
     using (var warmUp = new GpuImageDenoiser(gpu, new byte[16 * 16 * 3], 16, 16))
     {
-        warmUp.AddGaussianNoise(settings.Sigma, settings.Seed);
-        warmUp.Denoise(settings.Sigma, settings.Strength, settings.SearchRadius, settings.PatchRadius);
+        warmUp.AddGaussianNoise(Sigma, Seed);
+        warmUp.Denoise(Sigma, Strength, SearchRadius, PatchRadius);
         warmUp.GetNoisyPixels();
         warmUp.GetDenoisedPixels();
-        if (!settings.SkipNoise)
+        if (generateNoise)
         {
             warmUp.GetPsnr(false);
             warmUp.GetPsnr(true);
@@ -40,27 +46,27 @@ try
 
     using var denoiser = new GpuImageDenoiser(gpu, image.Pixels, image.Width, image.Height);
     timer.Restart();
-    if (settings.SkipNoise)
-        denoiser.UseInputAsNoisy();
+    if (generateNoise)
+        denoiser.AddGaussianNoise(Sigma, Seed);
     else
-        denoiser.AddGaussianNoise(settings.Sigma, settings.Seed);
+        denoiser.UseInputAsNoisy();
     timer.Stop();
     Console.WriteLine($"GPU input preparation: {timer.Elapsed.TotalMilliseconds:F3} ms");
 
     // Save the exact quantized image consumed by the filter before starting denoising.
-    string originalPath = Path.Combine(settings.OutputDirectory, "original.png");
-    string beforePath = Path.Combine(settings.OutputDirectory, "before.png");
-    string afterPath = Path.Combine(settings.OutputDirectory, "after.png");
+    string originalPath = Path.Combine(outputDirectory, "original.png");
+    string beforePath = Path.Combine(outputDirectory, "before.png");
+    string afterPath = Path.Combine(outputDirectory, "after.png");
     ImageFiles.SavePng(originalPath, image.Pixels, image.Width, image.Height);
     ImageFiles.SavePng(beforePath, denoiser.GetNoisyPixels(), image.Width, image.Height);
 
     timer.Restart();
-    denoiser.Denoise(settings.Sigma, settings.Strength, settings.SearchRadius, settings.PatchRadius);
+    denoiser.Denoise(Sigma, Strength, SearchRadius, PatchRadius);
     timer.Stop();
     Console.WriteLine($"GPU denoising: {timer.Elapsed.TotalMilliseconds:F3} ms");
     ImageFiles.SavePng(afterPath, denoiser.GetDenoisedPixels(), image.Width, image.Height);
 
-    if (!settings.SkipNoise)
+    if (generateNoise)
     {
         double beforePsnr = denoiser.GetPsnr(false);
         double afterPsnr = denoiser.GetPsnr(true);

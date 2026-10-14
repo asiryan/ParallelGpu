@@ -2,26 +2,28 @@ using System.Diagnostics;
 using ParallelGpu;
 using RayTracer;
 
+// Change the rendering parameters here before running the sample.
+const int Width = 960;
+const int Height = 540;
+const int SamplesPerPixel = 128;
+const int MaxBounces = 16;
+const ulong Seed = 42;
+const string OutputFile = "artifacts/raytracer.png";
+bool saveCheckpoints = false;
+
 try
 {
-    RenderSettings settings = RenderSettings.Parse(args);
-    if (settings.ShowHelp)
-    {
-        Console.WriteLine("Usage: RayTracer [output.png] [--width N] [--height N] [--samples N] [--bounces N] [--seed N] [--checkpoints]");
-        Console.WriteLine("Defaults: artifacts/raytracer.png, 960 x 540, 128 samples/pixel, 16 bounces, seed 42.");
-        Console.WriteLine("--checkpoints also saves images at 1, 8, and 32 samples/pixel when below the final sample count.");
-        return 0;
-    }
+    string outputPath = Path.GetFullPath(OutputFile);
 
     // Auto selects CUDA first, then compatible OpenCL devices; a real GPU is required.
     using var gpu = new Gpu(new GpuOptions { Backend = GpuBackend.Auto });
     Console.WriteLine($"Device: {gpu.DeviceName} ({gpu.Backend})");
-    Console.WriteLine($"Image: {settings.Width} x {settings.Height}; {settings.SamplesPerPixel} samples/pixel; {settings.MaxBounces} bounces; seed {settings.Seed}");
+    Console.WriteLine($"Image: {Width} x {Height}; {SamplesPerPixel} samples/pixel; {MaxBounces} bounces; seed {Seed}");
     Console.WriteLine("Scene: glass, polished and rough metal, and diffuse spheres on a checkerboard ground.");
 
     // Compile the sampling, RGB conversion, and reset kernels on a small image first.
     var setupTimer = Stopwatch.StartNew();
-    using (var warmUp = new RayTracingRenderer(gpu, 16, 16, settings.MaxBounces, settings.Seed))
+    using (var warmUp = new RayTracingRenderer(gpu, 16, 16, MaxBounces, Seed))
     {
         warmUp.AddSamples(1);
         warmUp.GetRgbPixels();
@@ -30,17 +32,17 @@ try
     setupTimer.Stop();
     Console.WriteLine($"Kernel warm-up: {setupTimer.Elapsed.TotalMilliseconds:F3} ms");
 
-    using var renderer = new RayTracingRenderer(gpu, settings.Width, settings.Height, settings.MaxBounces, settings.Seed);
+    using var renderer = new RayTracingRenderer(gpu, Width, Height, MaxBounces, Seed);
     bool cancelled = false;
     ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; Volatile.Write(ref cancelled, true); };
     Console.CancelKeyPress += cancelHandler;
     try
     {
-        int[] checkpoints = settings.SaveCheckpoints ? [1, 8, 32] : [];
+        int[] checkpoints = saveCheckpoints ? [1, 8, 32] : [];
         var renderTimer = new Stopwatch();
-        while (renderer.SamplesPerPixel < settings.SamplesPerPixel && !Volatile.Read(ref cancelled))
+        while (renderer.SamplesPerPixel < SamplesPerPixel && !Volatile.Read(ref cancelled))
         {
-            int target = settings.SamplesPerPixel;
+            int target = SamplesPerPixel;
             foreach (int checkpoint in checkpoints)
                 if (checkpoint > renderer.SamplesPerPixel && checkpoint < target)
                     target = checkpoint;
@@ -51,13 +53,13 @@ try
             renderTimer.Stop();
 
             if (renderer.SamplesPerPixel == target || renderer.SamplesPerPixel % 32 == 0)
-                Console.WriteLine($"Rendered: {renderer.SamplesPerPixel}/{settings.SamplesPerPixel} samples/pixel; GPU sampling: {renderTimer.Elapsed.TotalSeconds:F3} s");
+                Console.WriteLine($"Rendered: {renderer.SamplesPerPixel}/{SamplesPerPixel} samples/pixel; GPU sampling: {renderTimer.Elapsed.TotalSeconds:F3} s");
 
-            if (renderer.SamplesPerPixel == target && target < settings.SamplesPerPixel)
+            if (renderer.SamplesPerPixel == target && target < SamplesPerPixel)
             {
-                string checkpointPath = Path.Combine(Path.GetDirectoryName(settings.OutputPath)!,
-                    $"{Path.GetFileNameWithoutExtension(settings.OutputPath)}-{target:D3}spp.png");
-                RayTracerImage.SavePng(checkpointPath, renderer.GetRgbPixels(), settings.Width, settings.Height);
+                string checkpointPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
+                    $"{Path.GetFileNameWithoutExtension(outputPath)}-{target:D3}spp.png");
+                RayTracerImage.SavePng(checkpointPath, renderer.GetRgbPixels(), Width, Height);
                 Console.WriteLine($"Saved PNG: {checkpointPath}");
             }
         }
@@ -69,10 +71,10 @@ try
         }
 
         var outputTimer = Stopwatch.StartNew();
-        RayTracerImage.SavePng(settings.OutputPath, renderer.GetRgbPixels(), settings.Width, settings.Height);
+        RayTracerImage.SavePng(outputPath, renderer.GetRgbPixels(), Width, Height);
         outputTimer.Stop();
         Console.WriteLine($"GPU RGB conversion, download, and PNG encoding: {outputTimer.Elapsed.TotalMilliseconds:F3} ms");
-        Console.WriteLine($"Saved PNG: {settings.OutputPath} ({renderer.SamplesPerPixel} samples/pixel)");
+        Console.WriteLine($"Saved PNG: {outputPath} ({renderer.SamplesPerPixel} samples/pixel)");
         return Volatile.Read(ref cancelled) ? 130 : 0;
     }
     finally
