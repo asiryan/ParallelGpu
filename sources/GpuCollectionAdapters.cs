@@ -10,7 +10,8 @@ namespace ParallelGpu;
 /// GPU bodies can use its integer indexer (including inherited or renamed indexers) and Count or Length
 /// property. Device lengths come from the snapshot's Count; adapter callbacks run on the host.
 /// Registered list subclasses use adapters when captured through their registered declaration;
-/// List, IList, and IReadOnlyList declarations use native array or list storage.</remarks>
+/// List, IList, and IReadOnlyList declarations use native array or list storage. A registered
+/// capture declaration selects its own adapter before runtime adapter resolution.</remarks>
 public static class GpuCollectionAdapters
 {
     private sealed record Adapter(Type Element, Func<object, object> Capture);
@@ -103,6 +104,35 @@ public static class GpuCollectionAdapters
             candidate.DeclaringType == method.DeclaringType;
     }
 
+    /// <summary>Detects adapter upcasts that would keep storage for a different, hidden indexer.</summary>
+    internal static bool ChangesIndexer(Type source, Type destination, Type element)
+    {
+        if (source == destination || !adapters.ContainsKey(source) || !adapters.ContainsKey(destination))
+            return false;
+        MethodInfo? Indexer(Type type)
+        {
+            var properties = Properties(type).Where(property => property.PropertyType == element &&
+                property.GetIndexParameters() is [{ ParameterType: var index }] && index == typeof(int) &&
+                property.GetMethod is not null).ToArray();
+            return properties.FirstOrDefault(property => !properties.Any(other =>
+                property.DeclaringType != other.DeclaringType &&
+                property.DeclaringType!.IsAssignableFrom(other.DeclaringType)))?.GetMethod;
+        }
+        var sourceIndexer = Indexer(source);
+        var destinationIndexer = Indexer(destination);
+        if (!source.IsInterface && destinationIndexer?.DeclaringType is { IsInterface: true } contract &&
+            contract.IsAssignableFrom(source))
+        {
+            // A concrete getter and the interface it implements have different metadata.
+            var map = source.GetInterfaceMap(contract);
+            int index = Array.FindIndex(map.InterfaceMethods, method => SameAccessor(method, destinationIndexer));
+            if (index >= 0)
+                destinationIndexer = map.TargetMethods[index];
+        }
+        return sourceIndexer is not null && destinationIndexer is not null &&
+            !SameAccessor(sourceIndexer, destinationIndexer);
+    }
+
     /// <summary>Finds the element type of built-in segment, memory, and span representations.</summary>
     private static Type? BuiltinElement(Type type)
     {
@@ -115,21 +145,25 @@ public static class GpuCollectionAdapters
     }
 
     /// <summary>Captures built-in slices or adapted storage while reusing buffers for shared storage identities.</summary>
-    internal static bool TryCapture<T>(object source, Dictionary<object, object> snapshots, out GpuCollectionSnapshot<T> snapshot)
+    internal static bool TryCapture<T>(object source, Type? declaredType, Dictionary<object, object> snapshots,
+        out GpuCollectionSnapshot<T> snapshot, out Action<T[]>? copyMemory)
     {
+        copyMemory = null;
         switch (source)
         {
             case ArraySegment<T> segment:
                 snapshot = new(segment.Array ?? Array.Empty<T>(), segment.Offset, segment.Count);
                 break;
             case Memory<T> memory:
-                snapshot = CaptureMemory((ReadOnlyMemory<T>)memory, false, snapshots);
+                snapshot = CaptureMemory((ReadOnlyMemory<T>)memory, false, snapshots, out copyMemory);
                 break;
             case ReadOnlyMemory<T> memory:
-                snapshot = CaptureMemory(memory, true, snapshots);
+                snapshot = CaptureMemory(memory, true, snapshots, out copyMemory);
                 break;
             default:
-                var adapter = FindAdapter(source.GetType(), typeof(T));
+                // Different declarations of one object can expose independent indexers and storage.
+                var adapter = declaredType is not null && adapters.TryGetValue(declaredType, out var declared)
+                    ? declared : FindAdapter(source.GetType(), typeof(T));
                 if (adapter is null)
                 {
                     snapshot = default;
@@ -187,9 +221,11 @@ public static class GpuCollectionAdapters
     }
 
     /// <summary>Shares array storage or stages a full memory owner while retaining slice offsets and read-only access.</summary>
+    /// <remarks>Memory-manager copyback is separate from the first user callback for the shared identity.</remarks>
     private static GpuCollectionSnapshot<T> CaptureMemory<T>(ReadOnlyMemory<T> memory, bool readOnly,
-        Dictionary<object, object> snapshots)
+        Dictionary<object, object> snapshots, out Action<T[]>? copyMemory)
     {
+        copyMemory = null;
         if (MemoryMarshal.TryGetArray(memory, out ArraySegment<T> segment))
             return new(segment.Array ?? Array.Empty<T>(), segment.Offset, segment.Count, readOnly);
         // Snapshot the full owner once so overlapping slices share storage and a commit.
@@ -198,17 +234,12 @@ public static class GpuCollectionAdapters
             var storage = manager!.GetSpan();
             if (!snapshots.TryGetValue(manager, out var previous))
             {
-                previous = new GpuCollectionSnapshot<T>(storage.ToArray(),
-                    commit: values => values.AsSpan().CopyTo(manager.GetSpan()), identity: manager);
+                previous = new GpuCollectionSnapshot<T>(storage.ToArray(), identity: manager);
                 snapshots.Add(manager, previous);
             }
             if (previous is not GpuCollectionSnapshot<T> shared || shared.Buffer.Length != storage.Length)
                 throw new InvalidOperationException("Snapshots sharing a storage identity must use the same element type and full buffer length.");
-            if (shared.Commit is null)
-            {
-                shared = new(shared.Buffer, commit: values => values.AsSpan().CopyTo(manager.GetSpan()), identity: manager);
-                snapshots[manager] = shared;
-            }
+            copyMemory = values => values.AsSpan().CopyTo(manager.GetSpan());
             return new(shared.Buffer, start, length, readOnly, shared.Commit, manager);
         }
         if (typeof(T) == typeof(char) && MemoryMarshal.TryGetString((ReadOnlyMemory<char>)(object)memory,

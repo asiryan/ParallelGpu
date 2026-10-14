@@ -8,7 +8,8 @@ namespace ParallelGpu;
 /// denotes that exact native storage.
 /// Slices transfer the full backing buffer; read-only restrictions apply to each view. Commits run after
 /// successful execution and downloads, only for backing storage marked as written. Callback exceptions
-/// can leave partial host changes.</remarks>
+/// can leave partial host changes. When a native Memory view shares a memory-manager identity,
+/// its storage is updated before the user commit, independently of capture order.</remarks>
 public readonly struct GpuCollectionSnapshot<T>
 {
     /// <summary>Creates a snapshot covering an entire backing array.</summary>
